@@ -17,7 +17,7 @@ float hypotf(float x, float y);
 
 const char *const watch_labels[W_COUNT] = {
   "x", "y", "z", "facing", "move angle", "speed", "y speed", "camera angle", "camera pitch",
-  "camera dist", "input", "stick", "lag", "timer", "frame", "map", "air wall", "JS Height",
+  "camera dist", "input", "stick", "lag", "timer", "frame", "map", "air wall", "js height",
 };
 const char *const watches_corner_names[GFX_NPLACES] = { "top-left", "top-right", "bottom-left", "bottom-right",
                                                        "top-centre", "bottom-centre", "custom" };
