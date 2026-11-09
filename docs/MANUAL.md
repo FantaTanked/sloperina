@@ -288,7 +288,9 @@ With **settings > frame advance > enabled** on and the menu closed:
 - **Tap the button** (L or R): the game pauses (one more frame plays first, so the pause icon is on screen and
   you can see it hasn't crashed). Tap again: one frame. **Hold** it: after a moment, frames play
   one after another (about 15 a second) until you let go.
-- **Button + L3**: the game runs again.
+- **Button + L3**: the game runs again. It always works, even with the menu open (the menu closes): nothing is
+  drawn while paused, so a menu opened then can't be seen. Press L3 first, then the button, so the menu doesn't
+  take the button press.
 - A tap counts when you let go. You can hold or press anything else meanwhile (move the stick, hold A or Z...),
   as in gz: the frame you let through gets it. Only with **R** as the button, R + D-pad and R + right stick down
   stay shortcuts and don't advance.

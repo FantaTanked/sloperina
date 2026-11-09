@@ -173,6 +173,19 @@ static void fa_hold(void)
   for (;;) {
     sys_sleep_ns(16 * 1000 * 1000);
     input_update();
+    /* The button + L3 always runs again, even with the menu open: nothing is drawn while paused, so a
+     * menu opened here can't be seen, and it would take the button. Checked before the menu gets it. */
+    uint32_t held = input_held(), pressed = input_pressed(), fb = fa_bit();
+    if ((held & fb) && (held & BTN_LSTICK) && (pressed & (fb | BTN_LSTICK))) {
+      if (menu_current)
+        menu_close();
+      fa_down = fa_repeating = false;
+      fa_blocked = true, fa_menu_closed_at = sys_tick(); /* letting go of the button isn't a tap */
+      fa_paused = false;
+      gfx_pause_icon = 0;
+      gfx_notice("frame advance: running");
+      break;
+    }
     menu_controls();
     int b = fa_button();
     if (b == 2) { /* the button + L3: run */
