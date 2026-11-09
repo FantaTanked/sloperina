@@ -66,6 +66,11 @@ static uint64_t last_tick;
 
 static double absd(double v) { return v < 0 ? -v : v; }
 
+/* the record API (levitate.h): a search asked for by position.c, and frames in which a move it made
+ * may still be settling (the record ahead of the drawn position isn't "lost") */
+static bool requested;
+static int hold_frames;
+
 /* --- finding the record: a heap scan, nearest Link's actor first -----------------------------------
  * (game.py's method. A pointer search from the actor only reached copies the game rewrites from the
  * real record every frame: FINDINGS §5.19.) Each frame scans SCAN_PER_FRAME bytes, so the game keeps
@@ -192,16 +197,6 @@ static bool scan_step(void)
 
 /* Position, then the motion state with our velocity: requested velocity (z, x, y) at record +0x24
  * and the same after collision at +0x3C (FINDINGS §5.10); the rest as captured (game.py WAKE). */
-/* Link's facing as a unit (x, z) (actor +0x328 cos, +0x330 sin; 0 = +z) */
-static bool facing(double *fx, double *fz)
-{
-  uintptr_t o = link_actor();
-  if (!o || !sys_mapped(o + 0x328, 12, SYS_PERM_R))
-    return false;
-  *fz = *(float *)(o + 0x328), *fx = *(float *)(o + 0x330);
-  return true;
-}
-
 static void write_record(uintptr_t a, double x, double y, double z, float vx, float vy, float vz, bool motion)
 {
   volatile double *d = (volatile double *)a;
@@ -211,7 +206,7 @@ static void write_record(uintptr_t a, double x, double y, double z, float vx, fl
   /* The game turns Link to face his velocity; a zero velocity has no direction and set him
    * spinning. Not moving: a tiny one along the way he already faces. */
   double fx, fz;
-  if (vx * vx + vz * vz < 0.05 * 0.05 && facing(&fx, &fz))
+  if (vx * vx + vz * vz < 0.05 * 0.05 && link_facing(&fx, &fz))
     vx = (float)(fx * 0.01), vz = (float)(fz * 0.01);
   uint8_t m[sizeof(wake)];
   memcpy(m, wake, sizeof(m));
@@ -223,6 +218,7 @@ static void write_record(uintptr_t a, double x, double y, double z, float vx, fl
 
 static void search_failed(void)
 {
+  requested = false; /* position.c sees L_FAILED and says so */
   if (!quiet_search)
     gfx_notice("levitate: Link's position not found, try again");
   state = L_FAILED;
@@ -339,7 +335,6 @@ static double last_r[3];
 static vec3f_t last_drawn;
 static int frozen;
 static int trace; /* frames of float logged (diagnostics) */
-static bool facing(double *fx, double *fz);
 
 static void drop(void)
 {
@@ -383,7 +378,7 @@ static void float_step(double dt, bool menu_open)
   if (trace < 40) { /* what the game did with our last write */
     const volatile double *n = (const volatile double *)(record + 24);
     double fx = 0, fz = 0;
-    facing(&fx, &fz);
+    link_facing(&fx, &fz);
     (void)n;
     log_printf("levitate f%d: record y %.3f (we wrote %.3f) x %.3f z %.3f | drawn y %.3f | facing %.3f,%.3f | "
                "frozen %d clock %.2f", trace, cy, last_r[1], cx, cz, (double)drawn.y, fx, fz, frozen, clock);
@@ -469,6 +464,55 @@ static void speed_step(void)
   speed_x = cx, speed_z = cz, speed_known = true;
 }
 
+/* --- Link's record, for position.c ------------------------------------------------------------- */
+
+link_record_status_t link_record_status(void)
+{
+  switch (state) {
+    case L_READY: return REC_READY;
+    case L_FINDING: case L_TESTING: return REC_SEARCHING;
+    case L_FAILED: return REC_FAILED;
+    default: return requested ? REC_SEARCHING : REC_NONE;
+  }
+}
+
+void link_record_request(void)
+{
+  if (state == L_READY)
+    return;
+  if (state == L_FAILED) /* asked again: search again now */
+    state = L_IDLE;
+  requested = true;
+}
+
+/* Position, plus the motion state (record_motion: the test that found it wrote there safely): the game
+ * ignores a new position while Link stands unless that's written too, and standing leaves small
+ * leftovers in it, so it's rarely all zero (game.py's move wrote it every time too). */
+bool link_record_move(double x, double y, double z, float face_vx, float face_vz, int settle_frames)
+{
+  if (state != L_READY || !sys_mapped(record, 72, SYS_PERM_R | SYS_PERM_W))
+    return false;
+  write_record(record, x, y + PHYS_Y, z, face_vx, 0, face_vz, record_motion);
+  if (writing) /* floating: carry on from there */
+    px = x, py = y + PHYS_Y, pz = z, vx = vy = vz = 0, last_r[0] = px, last_r[1] = py, last_r[2] = pz;
+  speed_known = false;
+  if (settle_frames > hold_frames)
+    hold_frames = settle_frames;
+  return true;
+}
+
+void link_record_resync(void)
+{
+  vec3f_t d;
+  if (state != L_READY || !link_drawn_pos(&d) || !sys_mapped(record, 24, SYS_PERM_W))
+    return;
+  volatile double *r = (volatile double *)record;
+  r[0] = d.x, r[1] = d.y + PHYS_Y, r[2] = d.z;
+  if (writing)
+    px = d.x, py = d.y + PHYS_Y, pz = d.z, last_r[0] = px, last_r[1] = py, last_r[2] = pz;
+  hold_frames = 0;
+}
+
 /* --- frame --------------------------------------------------------------------------------------- */
 
 void levitate_frame(bool menu_open)
@@ -517,7 +561,9 @@ void levitate_frame(bool menu_open)
   if (state == L_FAILED && --fail_wait <= 0)
     state = L_IDLE;
 
-  if (state == L_READY && !record_follows_link() && !(writing && frozen)) {
+  if (hold_frames > 0)
+    hold_frames--;
+  if (state == L_READY && !hold_frames && !record_follows_link() && !(writing && frozen)) {
     log_printf("levitate: lost Link's record (new area?)");
     record = 0;
     state = L_IDLE;
@@ -525,7 +571,9 @@ void levitate_frame(bool menu_open)
   }
 
   bool want_speed = cheats[CHEAT_SPEED] && !floating && !menu_open;
-  if (state == L_IDLE && (floating || want_speed)) {
+  if (state == L_READY)
+    requested = false;
+  if (state == L_IDLE && (floating || want_speed || requested)) {
     search_start(!floating);
     return;
   }

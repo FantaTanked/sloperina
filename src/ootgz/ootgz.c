@@ -29,6 +29,7 @@
 #include "got.h"
 #include "ootgz_version.h"
 #include "pouch.h"
+#include "position.h"
 #include "sys.h"
 #include "z64hd.h"
 
@@ -262,6 +263,7 @@ static void frame(void)
   menus_research_frame();
   watches_frame(menu_current != 0);
   levitate_frame(menu_current != 0);
+  position_frame(menu_current != 0);
   warp_frame();
   gfx_frame();
 

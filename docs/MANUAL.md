@@ -69,6 +69,8 @@ With the menu closed:
 | **R + B + D-pad left** | Reset the timer |
 | **R + B + D-pad right** | Reset the lag counter |
 | **R + A + D-pad right** | Reset the jump height watch to **none** (as after a load) |
+| **R + D-pad up** | Save position: where Link is and which way he faces |
+| **R + D-pad down** | Load position: put Link back there (same map only) |
 | **L3** | Levitate on / off (if enabled, [2.10.2](#2102-levitate)) |
 | **R3** held | Levitate: hold your height |
 | **L** or **R** (your choice) | Frame advance (if enabled, [2.10.3](#2103-frame-advance)) |
@@ -84,6 +86,9 @@ With the menu closed:
 | **rupees** | Up to your wallet's size. **L** fills it. |
 | **age** | **child** or **adult**: what the next **reload map** gives you. |
 | **reload map** | Reloads the map you're in, at the age chosen above. Changing age loads the other age's version of the map and swaps sword and shield with the ones from the other age (adult-only tunics and boots come off a child). |
+
+| **save position (R + d-up)** | Remembers where Link is, which way he faces and the map (gz's save position). The first save in an area only finds Link's position in memory ("Locating Link's start position, please try again"; he's lifted a little while it's tested, as with levitate, and it's quicker while he's moving): press it again once it says it's found him. |
+| **load position (R + d-down)** | Puts Link back there, facing the same way. Only in the same map. With nothing saved: "No position saved yet". |
 
 Under **return**: Link's **position** (x, y, z), his **current age** and the **map**.
 

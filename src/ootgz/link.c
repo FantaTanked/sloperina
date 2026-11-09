@@ -43,6 +43,16 @@ bool link_drawn_pos(vec3f_t *out)
   return true;
 }
 
+/* actor +0x328 cos, +0x330 sin (oot26-tools) */
+bool link_facing(double *fx, double *fz)
+{
+  uintptr_t o = link_actor();
+  if (!o || !sys_mapped(o + 0x328, 12, SYS_PERM_R))
+    return false;
+  *fz = *(float *)(o + 0x328), *fx = *(float *)(o + 0x330);
+  return true;
+}
+
 uintptr_t camera(void)
 {
   uintptr_t p = sys_ptr(MAIN(Z64HD_CAMERA_PTR));

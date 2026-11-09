@@ -13,6 +13,7 @@
 #include "age.h"
 #include "gfx.h"
 #include "levitate.h"
+#include "position.h"
 #include "link.h"
 #include "menu.h"
 #include "input.h"
@@ -251,9 +252,12 @@ static void text_map(menu_item_t *it, char *buf, int len)
   snprintf(buf, len, TF("map: %s"), m);
 }
 
+static void act_save_position(menu_item_t *it) { position_save(); }
+static void act_load_position(menu_item_t *it) { position_load(); }
+
 static void build_link(void)
 {
-  menu_init(&m_link, "link", 14);
+  menu_init(&m_link, "link", 18);
   /* what can be changed first */
   menu_item_t *h = menu_add_number(&m_link, "health", get_health, set_health, max_health, fill_health, 0);
   if (h)
@@ -268,6 +272,12 @@ static void build_link(void)
   menu_item_t *rl = menu_add_action(&m_link, "reload map", act_reload_map, 0);
   if (rl)
     rl->hint = "L: reload this map at the age above";
+  menu_item_t *sp = menu_add_action(&m_link, "save position (R + d-up)", act_save_position, 0);
+  if (sp)
+    sp->hint = "L: remember where Link is and which way he faces";
+  menu_item_t *lp = menu_add_action(&m_link, "load position (R + d-down)", act_load_position, 0);
+  if (lp)
+    lp->hint = "L: put Link back there (same map only)";
   menu_add_return(&m_link);
   /* what can only be read, under return after a blank line */
   menu_add_text(&m_link, text_static, (intptr_t) "");
