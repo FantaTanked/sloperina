@@ -13,6 +13,7 @@
 #include "age.h"
 #include "gfx.h"
 #include "levitate.h"
+#include "position.h"
 #include "link.h"
 #include "menu.h"
 #include "input.h"
@@ -359,9 +360,19 @@ static void text_map(menu_item_t *it, char *buf, int len)
   snprintf(buf, len, TF("map: %s"), map_name);
 }
 
+static void act_save_position(menu_item_t *it)
+{
+  position_save();
+}
+
+static void act_load_position(menu_item_t *it)
+{
+  position_load();
+}
+
 static void build_link(void)
 {
-  menu_init(&m_link, "link", 14);
+  menu_init(&m_link, "link", 18);
   /* what can be changed first */
   menu_item_t *health = menu_add_number(&m_link, "health", get_health, set_health, max_health, fill_health, 0);
   if (health) {
@@ -379,6 +390,12 @@ static void build_link(void)
   menu_item_t *reload = menu_add_action(&m_link, "reload map", act_reload_map, 0);
   if (reload)
     reload->hint = "L: reload this map at the age above";
+  menu_item_t *save = menu_add_action(&m_link, "save position (R + d-up)", act_save_position, 0);
+  if (save)
+    save->hint = "L: remember where Link is and which way he faces";
+  menu_item_t *load = menu_add_action(&m_link, "load position (R + d-down)", act_load_position, 0);
+  if (load)
+    load->hint = "L: put Link back there (same map only)";
   menu_add_return(&m_link);
   /* what can only be read, under return after a blank line */
   add_blank_line(&m_link);
@@ -1374,6 +1391,11 @@ static void act_lag_reset(menu_item_t *it)
   lag_reset();
 }
 
+static void act_js_height_reset(menu_item_t *it)
+{
+  gfx_notice(js_height_reset() ? "JS Height reset" : "JS Height: Link not found");
+}
+
 /* --- watches: the list ------------------------------------------------------------------------------ */
 
 /* A row of the list, gz's buttons: the red cross (remove); the wrench (show the value in debug >
@@ -1771,6 +1793,9 @@ static void fill_watches(void)
   menu_add_action(&m_watches, "start/stop timer", act_timer_toggle, 0);
   menu_add_action(&m_watches, "reset timer", act_timer_reset, 0);
   menu_add_action(&m_watches, "reset lag counter", act_lag_reset, 0);
+  menu_item_t *jh = menu_add_action(&m_watches, "reset JS Height (R + A + d-right)", act_js_height_reset, 0);
+  if (jh)
+    jh->hint = "L: back to FLT_MAX, as after a load (any height)";
   menu_add_return(&m_watches);
   menu_refresh(&m_watches);
   /* the cursor keeps to the same button of whatever row it's now on */

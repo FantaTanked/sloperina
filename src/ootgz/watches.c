@@ -248,6 +248,12 @@ static void input_display_frame(bool menu_open)
 #define LINK_FACING_COS 0x328
 #define LINK_FACING_SIN 0x330
 #define LINK_VELOCITY 0x388
+/* JS Height: the player object is [[link + 0x270] + 0x358]; the float at +0x18E8 is FLT_MAX after a
+ * load and each jump sets it to Link's drawn y at takeoff + 0.7 (measured live in v131072). The
+ * jumpslash launch is said to depend on it (Link must be below it). */
+#define LINK_PLAYER_PTR 0x270
+#define PLAYER_PTR 0x358
+#define PLAYER_JS_HEIGHT 0x18E8
 
 /* the camera (link.h): position, then look-at, 3 floats each */
 #define CAMERA_POS 0x38
@@ -348,6 +354,22 @@ static bool link_motion(float *facing_cos, float *facing_sin, float velocity[3])
   return true;
 }
 
+/* where the JS Height float is, or 0 (the wrench, and its reset) */
+static uintptr_t js_height_addr(void)
+{
+  uintptr_t addr;
+  return js_height_address(&addr) && !(addr & 3) && sys_mapped(addr, 4, SYS_PERM_R) ? addr : 0;
+}
+
+bool js_height_reset(void)
+{
+  uintptr_t a = js_height_addr();
+  if (!a || !sys_mapped(a, 4, SYS_PERM_W))
+    return false;
+  *(volatile uint32_t *)a = 0x7F7FFFFFu; /* FLT_MAX */
+  return true;
+}
+
 static bool camera_look(float pos[3], float at[3])
 {
   uintptr_t cam = camera();
@@ -366,15 +388,15 @@ static bool camera_look(float pos[3], float at[3])
 bool js_height_address(uintptr_t *addr)
 {
   uintptr_t p = link_actor();
-  if (!p || p > UINTPTR_MAX - 0x270)
+  if (!p || p > UINTPTR_MAX - LINK_PLAYER_PTR)
     return false;
-  p = sys_ptr(p + 0x270);
-  if (!p || p > UINTPTR_MAX - 0x358)
+  p = sys_ptr(p + LINK_PLAYER_PTR);
+  if (!p || p > UINTPTR_MAX - PLAYER_PTR)
     return false;
-  p = sys_ptr(p + 0x358);
-  if (!p || p > UINTPTR_MAX - 0x18E8)
+  p = sys_ptr(p + PLAYER_PTR);
+  if (!p || p > UINTPTR_MAX - PLAYER_JS_HEIGHT)
     return false;
-  *addr = p + 0x18E8;
+  *addr = p + PLAYER_JS_HEIGHT;
   return true;
 }
 
@@ -693,7 +715,7 @@ bool watch_entry_has_address(const watch_entry_t *entry)
 {
   switch (entry->id) {
     case W_MEMORY: case W_X: case W_Y: case W_Z: case W_FACING: case W_Y_SPEED: case W_CAMERA_ANGLE:
-    case W_CAMERA_PITCH: case W_CAMERA_DIST: case W_FRAME: case W_MAP:
+    case W_CAMERA_PITCH: case W_CAMERA_DIST: case W_FRAME: case W_MAP: case W_JS_HEIGHT:
       return true;
     default:
       return false;
@@ -734,6 +756,9 @@ bool watch_entry_address(const watch_entry_t *entry, uintptr_t *addr, int *mw_ty
     case W_MAP:
       found = (uintptr_t)gd_get_str(GD_STR_MAP);
       type = MW_X8;
+      break;
+    case W_JS_HEIGHT:
+      found = js_height_addr();
       break;
     default:
       return false;
@@ -785,6 +810,8 @@ static void command_input(void)
   } else if (input_combo(BTN_R | BTN_B | BTN_DRIGHT)) {
     lag_reset();
     gfx_notice("lag counter reset");
+  } else if (input_combo(BTN_R | BTN_A | BTN_DRIGHT)) {
+    gfx_notice(js_height_reset() ? "JS Height reset" : "JS Height: Link not found");
   } else if (input_combo(BTN_R | BTN_DRIGHT) && !(held & (BTN_A | BTN_B))) {
     watches_shown = !watches_shown;
     gfx_notice(watches_shown ? "watches shown" : "watches hidden");

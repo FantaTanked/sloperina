@@ -43,7 +43,7 @@ void watch_entry_text(const watch_entry_t *e, char *buf, int len);
 const char *const *watch_entry_types(const watch_entry_t *e, int *n, int *current);
 void watch_entry_set_type(int index, int type);
 /* where the value is in memory, for the wrench (debug > memory): the built-in watches that read one
- * value (position, facing, y speed, camera, frame, map) and memory watches */
+ * value (position, facing, y speed, camera, frame, map, JS Height) and memory watches */
 bool watch_entry_has_address(const watch_entry_t *e);
 /* JS Height's f32: [[link_actor() + 0x270] + 0x358] + 0x18E8 (false while a pointer is missing) */
 bool js_height_address(uintptr_t *addr);
@@ -69,6 +69,8 @@ void watch_text(watch_t w, char *buf, int len);
 void timer_toggle(void);
 void timer_reset(void);
 void lag_reset(void);
+/* JS Height back to FLT_MAX, as after a load; false if Link isn't there */
+bool js_height_reset(void);
 /* frame hook: commands (menu closed) and the on-screen panel */
 void watches_frame(bool menu_open);
 

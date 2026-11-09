@@ -10,6 +10,7 @@ typedef struct { float x, y, z; } vec3f_t;
 uintptr_t link_actor(void);
 bool      link_health(int32_t **cur, int32_t **max); /* quarter hearts; pointers into the game */
 bool      link_drawn_pos(vec3f_t *out);              /* read-only; follows the physics record */
+bool      link_facing(double *fx, double *fz);       /* the way he faces, a unit (x, z); 0 = +z */
 uintptr_t camera(void);                              /* +0x38 position, +0x44 look-at */
 uint32_t  frame_counter(void);
 

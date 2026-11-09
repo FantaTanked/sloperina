@@ -29,6 +29,7 @@
 #include "got.h"
 #include "ootgz_version.h"
 #include "pouch.h"
+#include "position.h"
 #include "sys.h"
 #include "z64hd.h"
 #include "z64hd_builds.h"
@@ -53,13 +54,14 @@ static uint32_t frames_run;
  * tap lets one frame through, and the button + L3 lets it run again; the menu still opens (R + right
  * stick down) and works as usual. gz's pause icon shows at the top left. The game never sees the
  * button while it's on.
- * A tap is the button let go with nothing else pressed while it was held, so R's shortcuts (R +
- * right stick down, R + d-left...) don't pause the game. */
+ * As in gz, everything else can be held or pressed meanwhile (the stick, A, Z...): the frame let
+ * through reads the controller as it is, plus what was buffered while paused. Only R's shortcuts
+ * (R + right stick down, R + d-pad...) don't count as a tap, so they don't pause the game; L has none. */
 bool frame_advance = true;
 bool pause_display = true;
 int frame_advance_button; /* 0 L, 1 R */
 
-/* Held (with nothing else pressed) for FA_HOLD_MS, the button advances a frame every FA_REPEAT_MS
+/* Held (not as a shortcut) for FA_HOLD_MS, the button advances a frame every FA_REPEAT_MS
  * until it's let go. The wait leaves room for a tap that's a little long. */
 #define FA_HOLD_MS 400
 #define FA_REPEAT_MS 66
@@ -92,6 +94,12 @@ typedef enum {
 
 static uint32_t fa_button_bit(void) { return frame_advance_button ? BTN_R : BTN_L; }
 
+/* What, held or pressed with the button, makes it a shortcut rather than a tap. */
+static uint32_t fa_shortcut_keys(void)
+{
+  return frame_advance_button ? (BTN_DUP | BTN_DDOWN | BTN_DLEFT | BTN_DRIGHT | BTN_RS_DOWN) : 0;
+}
+
 static fa_event_t fa_read_button(void)
 {
   uint32_t button = fa_button_bit();
@@ -114,7 +122,7 @@ static fa_event_t fa_read_button(void)
 
   if (pressed & button) {
     fa_button_down = true;
-    fa_not_a_tap = (held & ~button) != 0;
+    fa_not_a_tap = (held & fa_shortcut_keys()) != 0;
     fa_button_down_at = sys_tick();
     fa_repeating = false;
   }
@@ -126,7 +134,7 @@ static fa_event_t fa_read_button(void)
     fa_not_a_tap = true;
     return FA_RUN;
   }
-  if (pressed & ~button)
+  if (pressed & fa_shortcut_keys())
     fa_not_a_tap = true;
 
   if (!(held & button)) {
@@ -226,6 +234,23 @@ static void fa_hold_game(void)
   for (;;) {
     sys_sleep_ns(FA_POLL_NS);
     input_update();
+    /* The button + L3 always runs again, even with the menu open: nothing is drawn while paused, so a
+     * menu opened here can't be seen, and it would take the button. Checked before the menu gets it. */
+    uint32_t held = input_held();
+    uint32_t pressed = input_pressed();
+    uint32_t button = fa_button_bit();
+    if ((held & button) && (held & BTN_LSTICK) && (pressed & (button | BTN_LSTICK))) {
+      if (menu_current)
+        menu_close();
+      fa_button_down = false;
+      fa_repeating = false;
+      fa_blocked_after_menu = true; /* letting go of the button isn't a tap */
+      fa_menu_closed_at = sys_tick();
+      fa_paused = false;
+      gfx_pause_icon = 0;
+      gfx_notice("frame advance: running");
+      break;
+    }
     menu_controls();
     fa_event_t event = fa_read_button();
     if (event == FA_RUN) {
@@ -311,6 +336,7 @@ static void frame(void)
   menus_research_frame();
   watches_frame(menu_current != 0);
   levitate_frame(menu_current != 0);
+  position_frame(menu_current != 0);
   warp_frame();
   gfx_frame();
 

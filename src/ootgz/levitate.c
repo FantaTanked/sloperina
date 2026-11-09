@@ -112,6 +112,10 @@ static uintptr_t record;
  * finds they're more position doubles, and writing motion state over them crashed the game */
 static bool record_has_motion;
 static bool quiet_search; /* started by the speed cheat: no notices */
+/* the record API (levitate.h): a search asked for by position.c, and frames in which a move it made
+ * may still be settling (the record ahead of the drawn position isn't "lost") */
+static bool requested;
+static int hold_frames;
 static int retry_wait_frames;
 static int heal_frames_left;
 static int32_t heal_to;
@@ -278,17 +282,6 @@ static bool scan_step(void)
   return false;
 }
 
-/* Link's facing as a unit (x, z) */
-static bool link_facing(double *fx, double *fz)
-{
-  uintptr_t actor = link_actor();
-  if (!actor || !sys_mapped(actor + LINK_FACING_COS, 12, SYS_PERM_R))
-    return false;
-  *fz = *(float *)(actor + LINK_FACING_COS);
-  *fx = *(float *)(actor + LINK_FACING_SIN);
-  return true;
-}
-
 /* Position, then (if write_motion) the motion state with our velocity: requested velocity (z, x, y)
  * at record +0x24 and the same after collision at +0x3C (FINDINGS §5.10); the rest as captured
  * (game.py WAKE). */
@@ -318,6 +311,7 @@ static void write_record(uintptr_t addr, double x, double y, double z, float vx,
 
 static void search_failed(void)
 {
+  requested = false; /* position.c sees REC_FAILED and says so */
   if (!quiet_search)
     gfx_notice("levitate: Link's position not found, try again");
   search_state = SEARCH_FAILED;
@@ -822,9 +816,77 @@ static bool search_running(void)
   return false;
 }
 
+/* --- Link's record, for position.c ------------------------------------------------------------- */
+
+link_record_status_t link_record_status(void)
+{
+  switch (search_state) {
+    case SEARCH_READY: return REC_READY;
+    case SEARCH_FINDING: case SEARCH_TESTING: return REC_SEARCHING;
+    case SEARCH_FAILED: return REC_FAILED;
+    default: return requested ? REC_SEARCHING : REC_NONE;
+  }
+}
+
+void link_record_request(void)
+{
+  if (search_state == SEARCH_READY)
+    return;
+  if (search_state == SEARCH_FAILED) /* asked again: search again now */
+    search_state = SEARCH_IDLE;
+  requested = true;
+}
+
+/* Position, plus the motion state (record_has_motion: the test that found it wrote there safely): the
+ * game ignores a new position while Link stands unless that's written too, and standing leaves small
+ * leftovers in it, so it's rarely all zero (game.py's move wrote it every time too). */
+bool link_record_move(double x, double y, double z, float face_vx, float face_vz, int settle_frames)
+{
+  if (search_state != SEARCH_READY || !sys_mapped(record, RECORD_SIZE, SYS_PERM_R | SYS_PERM_W))
+    return false;
+  write_record(record, x, y + PHYS_Y, z, face_vx, 0, face_vz, record_has_motion);
+  if (moving_link) { /* floating: carry on from there */
+    pos_x = x;
+    pos_y = y + PHYS_Y;
+    pos_z = z;
+    vel_x = vel_y = vel_z = 0;
+    last_written[0] = pos_x;
+    last_written[1] = pos_y;
+    last_written[2] = pos_z;
+  }
+  speed_known = false;
+  if (settle_frames > hold_frames)
+    hold_frames = settle_frames;
+  return true;
+}
+
+void link_record_resync(void)
+{
+  vec3f_t drawn;
+  if (search_state != SEARCH_READY || !link_drawn_pos(&drawn) || !sys_mapped(record, 24, SYS_PERM_W))
+    return;
+  volatile double *pos = (volatile double *)record;
+  pos[0] = drawn.x;
+  pos[1] = drawn.y + PHYS_Y;
+  pos[2] = drawn.z;
+  if (moving_link) {
+    pos_x = drawn.x;
+    pos_y = drawn.y + PHYS_Y;
+    pos_z = drawn.z;
+    last_written[0] = pos_x;
+    last_written[1] = pos_y;
+    last_written[2] = pos_z;
+  }
+  hold_frames = 0;
+}
+
+/* --- frame --------------------------------------------------------------------------------------- */
+
 void levitate_frame(bool menu_open)
 {
   input_hide_from_game = (levitate_enabled ? BTN_LSTICK : 0) | (floating ? BTN_RSTICK : 0);
+  if (hold_frames > 0)
+    hold_frames--;
   double dt = frame_seconds();
   layers_frame(cheats[CHEAT_WALLS]);
   heal_after_drop();
@@ -835,7 +897,7 @@ void levitate_frame(bool menu_open)
   if (search_state == SEARCH_FAILED && --retry_wait_frames <= 0)
     search_state = SEARCH_IDLE;
 
-  if (search_state == SEARCH_READY && !record_follows_link() && !(moving_link && frozen_frames)) {
+  if (search_state == SEARCH_READY && !hold_frames && !record_follows_link() && !(moving_link && frozen_frames)) {
     log_printf("levitate: lost Link's record (new area?)");
     record = 0;
     search_state = SEARCH_IDLE;
@@ -848,7 +910,9 @@ void levitate_frame(bool menu_open)
 
   bool want_speed = cheats[CHEAT_SPEED] && !floating && !menu_open;
   bool want_walls = cheats[CHEAT_WALLS] && !floating && !menu_open;
-  if (search_state == SEARCH_IDLE && (floating || want_speed || want_walls)) {
+  if (search_state == SEARCH_READY)
+    requested = false;
+  if (search_state == SEARCH_IDLE && (floating || want_speed || want_walls || requested)) {
     search_start(!floating);
     return;
   }

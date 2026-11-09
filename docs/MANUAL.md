@@ -68,6 +68,9 @@ With the menu closed:
 | **R + A + D-pad left** | Start / stop the timer |
 | **R + B + D-pad left** | Reset the timer |
 | **R + B + D-pad right** | Reset the lag counter |
+| **R + A + D-pad right** | Reset **JS Height** to FLT_MAX (as after a load: the jumpslash then works at any height) |
+| **R + D-pad up** | Save position: where Link is and which way he faces |
+| **R + D-pad down** | Load position: put Link back there (same map only) |
 | **L3** | Levitate on / off (if enabled, [2.10.2](#2102-levitate)) |
 | **R3** held | Levitate: hold your height |
 | **L** or **R** (your choice) | Frame advance (if enabled, [2.10.3](#2103-frame-advance)) |
@@ -83,6 +86,9 @@ With the menu closed:
 | **rupees** | Up to your wallet's size. **L** fills it. |
 | **age** | **child** or **adult**: what the next **reload map** gives you. |
 | **reload map** | Reloads the map you're in, at the age chosen above. Changing age loads the other age's version of the map and swaps sword and shield with the ones from the other age (adult-only tunics and boots come off a child). |
+
+| **save position (R + d-up)** | Remembers where Link is, which way he faces and the map (gz's save position). The first save in an area only finds Link's position in memory ("Locating Link's start position, please try again"; he's lifted a little while it's tested, as with levitate, and it's quicker while he's moving): press it again once it says it's found him. |
+| **load position (R + d-down)** | Puts Link back there, facing the same way. Only in the same map. With nothing saved: "No position saved yet". |
 
 Under **return**: Link's **position** (x, y, z), his **current age** and the **map**.
 
@@ -178,7 +184,9 @@ row of buttons:
 Under the list:
 
 - **📁 (known watches)**: the built-in watches: x, y, z, facing, move angle, speed, y speed, camera angle /
-  pitch / distance, input, stick, lag, timer, frame, map, air wall. Each can be in the list once.
+  pitch / distance, input, stick, lag, timer, frame, map, air wall, JS Height. Each can be in the list once.
+  **JS Height** is the height your last jump set (takeoff + 0.7; FLT_MAX until you jump after a load), which
+  the jumpslash launch is limited to. It's always in the list (hide it to keep it off screen).
 - **+ (custom watch)**: a watch of any memory address. Type the address (D-pad left / right: digit, up / down:
   change it), **L** to add. It starts from your last memory watch, as in gz. One watch per address.
 
@@ -186,7 +194,8 @@ Under the list:
 Angles: **deg**, **hex** (the game's 16-bit angle, 0x4000 = 90°), **s16**, **rad**. Counters: **dec**, **hex**.
 Timer: **m:s**, **sec**. Stick: **%**, **raw**. Memory watches: **u8 s8 x8 u16 s16 x16 u32 s32 x32 f32 x64**.
 
-**timer**: **start/stop timer**, **reset timer**, **reset lag counter** (also shortcuts, [1.3](#13-shortcuts-in-the-game)).
+**timer**: **start/stop timer**, **reset timer**, **reset lag counter**, **reset JS Height** (back to FLT_MAX, as
+after a load) (also shortcuts, [1.3](#13-shortcuts-in-the-game)).
 
 **The keyboard** (renaming): the text line at the top (D-pad left / right moves the cursor, **L** finishes), then
 rows of keys (D-pad picks a key, **L** types it) and a row of **shift**, **space**, **back**, **del** and **ok**.
@@ -289,8 +298,12 @@ With **settings > frame advance > enabled** on and the menu closed:
 - **Tap the button** (L or R): the game pauses (one more frame plays first, so the pause icon is on screen and
   you can see it hasn't crashed). Tap again: one frame. **Hold** it: after a moment, frames play
   one after another (about 15 a second) until you let go.
-- **Button + L3**: the game runs again.
-- A tap counts when you let go, and only if you pressed nothing else meanwhile, so R's shortcuts still work.
+- **Button + L3**: the game runs again. It always works, even with the menu open (the menu closes): nothing is
+  drawn while paused, so a menu opened then can't be seen. Press L3 first, then the button, so the menu doesn't
+  take the button press.
+- A tap counts when you let go. You can hold or press anything else meanwhile (move the stick, hold A or Z...),
+  as in gz: the frame you let through gets it. Only with **R** as the button, R + D-pad and R + right stick down
+  stay shortcuts and don't advance.
 - **Buffered input**: everything you press while paused, and the last direction you push each stick, is given to
   the next frame, even if you've let go by then.
 - While paused the picture doesn't change (the game draws nothing), so the watches and input display update with

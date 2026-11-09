@@ -65,6 +65,17 @@ bool link_drawn_pos(vec3f_t *out)
   return true;
 }
 
+/* Link's facing as a unit (x, z): actor +0x328 cos, +0x330 sin (oot26-tools; 0 = +z) */
+bool link_facing(double *fx, double *fz)
+{
+  uintptr_t actor = link_actor();
+  if (!actor || !sys_mapped(actor + 0x328, 12, SYS_PERM_R))
+    return false;
+  *fz = *(float *)(actor + 0x328);
+  *fx = *(float *)(actor + 0x330);
+  return true;
+}
+
 uintptr_t camera(void)
 {
   uintptr_t manager = sys_ptr(MAIN(z64hd_game->camera_ptr));
