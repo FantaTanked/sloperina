@@ -37,7 +37,7 @@ goes back.
   in memory; the box can go in any corner or anywhere.
 - **debug**: heap and gz's memory viewer (edit, add watches, follow pointers).
 - **settings**: language, menu size and background, the input display (gz's row or a Switch 2 Pro Controller),
-  levitate (L3), frame advance (L or R) with gz's pause icons.
+  levitate (L3 toggle, held X/B up/down, release to hover), frame advance (L or R) with gz's pause icons.
 - gz's log of what was done, bottom right.
 
 ## Layout

@@ -539,6 +539,12 @@ Objects:
 
 ## 6. Things that do not work
 
+- **Using character 0x7F for an icon:** menu, log, splash, and input panels already use it as an
+  invisible sizing marker. The 0.0.3 JS Height padlock made those markers visible throughout the UI.
+  In 0.0.4 the 0x7F glyph is blank and the padlock uses 0x80. The real menu layout and font are covered
+  by a host regression test that checks sizing markers stay blank; the menu and watch were also
+  rendered headlessly. In-game verification of the correction is still pending.
+
 Each of these was tried and verified not to help:
 - `SeqOneShotResetPlayerStatus` flags (HUD screen `+0x384 = -1`, `+0x388 = 1`): consumed, but no redraw.
 - `main+0xe35440(screen)` (the "event end in" routine): no redraw.
@@ -582,26 +588,101 @@ Each of these was tried and verified not to help:
 
 ## 8. Open problems
 
+### Native collision bypass (0.0.9 test build)
+
+- **Symptom confirmed by the user in 0.0.8:** some walls pass, others block Link or trap him.
+  The session log shows the record returning to y=110.463 while the mod requests heights from
+  108.701 to 112.102, and drawn y remains 109.623. `frozen` remains zero in those attempts.
+  The pause heuristic therefore does not explain this particular blockage. Disabling only the
+  mod's push-back response never disabled the game's collision solver.
+- **Verified by disassembly and read-only live inspection:** the character property resolves as
+  `[ [ [ [ [link_actor()+0x270]+0x50]+0x20]+0x10]+8 ]`, each bracket a u64 dereference.
+  Its vtable is main+0x4C34F10 (`CharacterProperty`); +0x20 points to the controller body,
+  vtable main+0x4C34658. These are module offsets, not session addresses.
+- `OneShotPhysicsCctChangePosition` at main+0x2900120 follows this chain and calls property
+  vtable +0xE8 = main+0x6B2530 with a pointer to three f32 coordinates. This preserves the
+  rotation, changes the transform translation, then invokes the attached-body updates through
+  vtable +0x250 = main+0x6B23A0. The controller transform translation and Link's drawn position
+  matched in live reads. The scanned double record uses the capsule centre; the mod measures
+  its vertical offset from drawn feet when floating starts rather than assuming child/adult height.
+- `OneshotChangeForceNoHitMode` (name getter main+0x295F800, executor main+0x295F0D0) reaches
+  that same body through property +0x20 at main+0x295F564..574. Its collision toggle calls
+  main+0x158D40(body, bool). That function locks the body and queues the filter change. The
+  current state is body +0x70 bit 11, overridden by `[body+0x60]+0xF8` bit 0 when that pending
+  object's +0x100 bit 19 is set. The setter preserves the other filter fields.
+- **Implementation:** `cct.c` validates the current actor/controller types, attached lists and
+  pending state; remembers the prior collision mode; calls ForceNoHit while through-walls
+  levitation is active; and uses the game's position setter alongside the existing physics
+  record. L3, disable and mode changes restore the prior collision state. Unavailable objects
+  defer restoration until they can be validated; replaced actors/controllers are never written.
+  The frozen-state shortcut can no longer bypass the physics record's mapping check.
+- **Validation boundary:** native build and host lifecycle/integration tests pass. Live reads
+  verified the chain/types and static analysis verified the call paths. The emulator build ID matches the installed test module. With the option enabled, a live
+  read confirms body +0x70 bit 11 becomes set and the controller transform matches drawn position.
+  The user subsequently confirmed traversal through the previously blocking wall. The first retest had
+  through-walls off (log and saved setting both confirmed), so it did not exercise the bypass. The release fall fix is documented below. Camera behavior
+  is not separately verified. The old stationary-position pause heuristic remains.
+
+- **Manual vertical controls (fork 0.0.8):** X commands ascent, B commands descent, neither/both
+  hold height; R3 overrides both. At a legacy saved speed of 0, manual movement uses 4 units/s.
+  With through-walls enabled, B descent bypasses the mod's upward floor correction, which would
+  otherwise undo downward movement every frame. X/B/R3 are masked from the game only while floating.
+  Host tests verify direction/release/reversal, floor feedback, simultaneous horizontal movement,
+  menus, legacy zero speed and mask cleanup. This is not a collision-mask change: wall/ceiling
+  blocking, camera follow and the stationary-position pause heuristic remain unresolved. No game
+  runtime verification of the controls has been performed.
+
+
+- **Fast fall after L3 release (fork 0.0.7):** the user reports a very fast fall when stopping
+  levitation. Previously `drop()` stopped position writes without clearing any physics velocity.
+  At that stage stored falling velocity was suspected but unconfirmed. That release cleared only the
+  documented requested/post-collision y velocities (`record +0x2C/+0x44`, §5.10), once, after checking
+  the record still follows Link, is readable/writable and has plausible motion state. It does not
+  change position, horizontal velocity or gravity. Host tests cover the exact writes, L3/disable,
+  invalid records and no further writes after release. The game may have additional momentum state;
+  the user has now confirmed that 0.0.7 still drops too fast. Clearing these fields is insufficient;
+  that attempt was insufficient. See the verified 0.0.9 follow-up below.
+
+- **Zero-rise hover (fork 0.0.6):** rise speed previously offered a minimum of 2, and settings
+  rejected 0. The menu now offers 0 and settings retain it. At zero rise, vertical levitation velocity
+  is explicitly cleared: simply adding 0 to the options would leave a previous upward velocity
+  unchanged because the acceleration step is also 0. Host tests verify stationary hover without R3,
+  horizontal wall passage at fixed height, switching from positive rise to 0 and back, and persistence.
+  Floor corrections from 0.0.5 still apply; the game's runtime behavior remains to be tested.
+
+- **Levitation floor support (fork 0.0.5):** `float_step` read the game's current y but then wrote
+  its own accumulated y back, discarding upward physics corrections even while passing through walls.
+  It now retains the higher of those heights before adding the requested rise. Horizontal wall
+  push-back remains controlled by the existing option; downward drift does not lower the hover.
+  Host tests exercise floor corrections, rising platforms, both wall modes, pause/drop and record loss.
+  This is not a floor raycast or a change to collision masks: an upward change can also be an impulse,
+  and missing geometry or a floor crossed between physics updates cannot be detected here. Actual
+  wall/floor behavior, slopes and moving platforms still need in-game verification.
+
+- **JS Height reset/lock (0.0.3):** the user supplied the f32 chain
+  `[[link_actor() + 0x270] + 0x358] + 0x18E8` and reported `FLT_MAX` on fresh load, with jumps/sidehops
+  replacing it with takeoff Y + 0.70. The watch reads it dynamically; optional reset writes `FLT_MAX`
+  once and lock repeats that write in `watches_frame`. Both resolve the current actor and check
+  alignment, overflow and read/write mapping before writing only four bytes. Lock is session-only,
+  defaults off, and continues independently of HUD visibility. Its interaction with the game's
+  threshold setter/check ordering has not been runtime-verified. A per-frame freeze cannot guarantee
+  suppression of a setter and check that run between mod frames; the game's setter would need separate
+  investigation if that occurs.
+
 - Warping into a dungeon doesn't register the current room, so the map screen shows "???" until you walk through a
   door.
 - Upgrades other than the wallet are wired up (§5.7) but not yet confirmed in game.
-- Walk through walls (cheats > player) works in SacredForestMeadow_Child (confirmed in game, 9th November 2026);
-  not yet tried elsewhere (dungeons, doors, air walls). What led there, tested at a rock wall at about
-  (8.56, 119.94, -105.41) in the physics record:
-  - Writing Link's x/z each frame doesn't get him through: the game puts the record back at exactly the same spot
-    at the wall every frame. Levitate's "through walls" fails at the same wall: its writes took every other frame
-    for about 0.2 s, then not at all (not even the height).
-  - Against a wall his requested velocity (record `+0x24`) drops from about 4.4 units/s at a run to 0.1-0.5.
-  - Floors there are on the same layers as the walls (mostly GroundHighRes grass; `phive.py map`), so switching off
-    Link's collision with those layers would drop him through the floor.
-  The cheat now switches off Link's collision with GroundObject, GroundHighRes(Smooth/Rough) and GroundStaticTree
-  in the game's layer table (`layers.c`) while it walks him through, and holds his height meanwhile. The game reads
-  that table at run time: with the bits cleared, the record follows the cheat's writes, and Link's logged path
-  crossed about 30 GroundHighRes wall faces (wood, stone, steep grass). The heap holds 4 copies (2 of each mask
-  array); searching for them all at once held the game for 21 s, so `layers.c` searches 8 MiB per frame from the
-  moment the cheat is ticked. The table: PhiveConfig's
-  `LayerEntityFilterTable` (22 x 22, values 0/1/2) is read at boot by `main+0xca326c` into two arrays of 22 u64
-  masks per table (bit per layer hit: entries 1 or 2, and entries 2). Both are symmetric. Player is layer 3.
+- Walk through walls (cheats > player): when the stick holds Link against a wall for 0.2 s, the cheat switches off
+  his controller's collision with the game's ForceNoHit (`cct.c`, "Native collision bypass") and walks him on at the
+  height he was at through the controller's position setter, until the stick is let go or turned; then collision
+  comes back and the landing is protected as after a float. Being retested in game with this method. Earlier tries,
+  SacredForestMeadow_Child, a rock wall at about (8.56, 119.94, -105.41) in the physics record:
+  - Writing Link's x/z each frame doesn't get him through: the game puts the record back at the wall every frame.
+    Against a wall his requested velocity (record `+0x24`) drops from about 4.4 units/s at a run to 0.1-0.5.
+  - Clearing the Player bits in Phive's layer table (PhiveConfig `LayerEntityFilterTable`, read at boot by
+    `main+0xca326c` into two arrays of 22 u64 masks, 4 copies on the heap) did let him through, while it held his
+    height: the game reads that table at run time. It changed every Player-layer body and needed a 21 s heap search
+    (later spread over frames), so the cheat moved to the controller's own ForceNoHit (0.0.9's levitate method).
 - Count items (sticks, nuts, bombs, bombchus, beans), bottles and masks aren't cleared from item buttons when
   removed.
 - Unticking an ocarina leaves `ActionGuide_IsEnd.Navi` set (the D-pad stays, empty).
@@ -730,7 +811,44 @@ Entries 1 to 4 and 14 were empty; 35 and 40 had no name getter.
   - StaticCompoundBodyMgr is the obvious place to look for the map's collision in memory (COLLISION.md, "the
     unknowns"), and DungeonMgr for the explored room a menu warp leaves unset (§8).
 
-### 9.4 Actors, their life and position (from the disassembly, v131072; checked in game 9th November 2026)
+
+
+### 9.4 L3 release: controller velocity and landing history (0.0.9-test2)
+
+- Read-only observation of the running 0.0.9-test build found body `+0xE0` velocity
+  `(0, -60, 0)` while Link hovered; actor output `+0x388` and momentum `+0x3A0`
+  also reported approximately -60 Y. Clearing only scanned-record `+0x2C/+0x44`
+  in 0.0.7/0.0.8 did not reset the actual controller (confirmed by the user).
+- `ExecutePhysicsCctReduceVerticalGravityPositionVelocity`, helper main+0x278AA90,
+  reads body+0xE0 and calls main+0x12DBE0 with a new vector. This setter locks the
+  body and queues linear velocity at pending+0x3C with pending+0x100 bit 7. The
+  mod now calls it each floating frame and once at release, preserving applied
+  X/Z and clearing Y. Collision restoration follows the release reset. Gravity
+  is not altered and velocity is not clamped during the subsequent fall.
+- `QueryPhysicsCctIsOnGround` at main+0x2AABA20 reads property+0x48, selects the
+  result pointer at +0x40 + 8*[+0x58], and tests result+0x10 == 0. This is used
+  to end landing protection after six supported frames, rather than a timer.
+- main+0x5FCF6C computes player+0x190C = player+0x18D4 - actor+0x320; +0x5FD128
+  maintains the peak Y at player+0x18E0. +0x5FD19C feeds actor's base component
+  `[[actor+0x270]+0x2B8]` at +0x1898. main+0x484A10 computes its fall distance
+  +0x189C = max(origin Y - actor Y, 0). During levitation and its first landing,
+  these origins follow current Y and distances are cleared. The base backpointer
+  +0x1340 and player backpointer +0x18 must match the current actor before writes.
+  JS Height +0x18E8, health, gravity and actual position are untouched by this reset.
+- The old 90-frame health refund was removed. It could expire during a long drop
+  and restored damage after it happened. The new mechanism resets fall history;
+  it does not suppress enemies or other damage and does not provide void immunity.
+- Host tests pass for terminal-speed reset, preserving horizontal motion, null/
+  unavailable/replaced objects, exact fall-history targets, long drops, supported
+  landing, and ending protection. Native v131072 build passes without warnings.
+  **User runtime result: gentle fall, no damage.** The test2 log independently
+  shows the release reset queued, collision restored, and normal fall damage restored after
+  landing. This is a confirmed test case, not exhaustive coverage of every scene/event.
+- User confirmed the preceding test's native through-walls bypass passes the wall
+  that previously trapped Link, after turning through walls ON. Void-trigger
+  visualization and optional levitation void immunity are still under investigation.
+
+### 9.5 Actors, their life and position (from the disassembly, v131072; checked in game 9th November 2026)
 - **The actor manager** `mgr = *(main+0x4E90D90)` (`+0x00` a mutex: lock `main+0x3C42460`, unlock `main+0x3C42470`).
   The live actors are in an intrusive red-black tree at `[mgr+0x38]`: node N has left `+0x00`, right `+0x08`,
   parent|colour `+0x10`; each node is at `+8` in an entry E (`E = N - 8`) with the actor at `[E+0x28]` and the next

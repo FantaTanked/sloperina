@@ -72,7 +72,8 @@ With the menu closed:
 | **R + D-pad up** | Save position: where Link is and which way he faces |
 | **R + D-pad down** | Load position: put Link back there (same map only) |
 | **L3** | Levitate on / off (if enabled, [2.10.2](#2102-levitate)) |
-| **R3** held | Levitate: hold your height |
+| **X / B** held | Levitate up / down; release to hover |
+| **R3** held | Levitate: hold height even if X/B is held |
 | **L** or **R** (your choice) | Frame advance (if enabled, [2.10.3](#2103-frame-advance)) |
 
 ## 2 Menus
@@ -130,9 +131,8 @@ each kept full while ticked.
 
 **player**: **2x movement speed** makes Link move twice as far each frame. **walk through walls**: hold the stick
 against a wall, rock or air wall and Link walks on through it at the height he was at, until you let go of the stick
-or turn it. While floating, levitate's own **through walls** setting applies instead. **lock JS height**
-keeps the JS Height watch's value at what it was when you ticked it (3.40282347e+38 after a fresh load), writing it
-back every frame, across area changes too. Ticked at start-up, it keeps the first value it can read.
+or turn it. While floating, levitate's own **through walls** setting applies instead. (To keep JS Height at its
+maximum, see **watches > Lock JS Height**.)
 
 ### 2.5 Inventory
 
@@ -195,14 +195,33 @@ Under the list:
 Angles: **deg**, **hex** (the game's 16-bit angle, 0x4000 = 90°), **s16**, **rad**. Counters: **dec**, **hex**.
 Timer: **m:s**, **sec**. Stick: **%**, **raw**. Memory watches: **u8 s8 x8 u16 s16 x16 u32 s32 x32 f32 x64**.
 
-**timer**: **start/stop timer**, **reset timer**, **reset lag counter**, **reset JS Height** (back to FLT_MAX, as
-after a load) (also shortcuts, [1.3](#13-shortcuts-in-the-game)).
+**timer**: **start/stop timer**, **reset timer**, **reset lag counter** (also shortcuts,
+[1.3](#13-shortcuts-in-the-game)). **Reset JS Height** is under its own heading, below.
 
 **The keyboard** (renaming): the text line at the top (D-pad left / right moves the cursor, **L** finishes), then
 rows of keys (D-pad picks a key, **L** types it) and a row of **shift**, **space**, **back**, **del** and **ok**.
 **return** cancels. Up to 12 characters.
 
 Memory watches aren't saved (addresses change every time the game starts); everything else is.
+
+**JS Height** is the seventh default watch. It resolves the current player's jumpslash height
+threshold on each read, showing an f32 with nine significant digits, **Max** for `FLT_MAX`, or **N/A**
+if unavailable. A padlock beside its name in the HUD and Watches list indicates that **Lock JS Height**
+is enabled. Custom names are preserved; long names are shortened on screen to leave room for the icon.
+
+Under the watch list, the **JS Height** controls change that threshold:
+
+- **Reset JS Height** writes `FLT_MAX` (about `3.40282347e+38`) once (also **R + A + D-pad right**). A later jump
+  may change it again.
+- **Lock JS Height** keeps writing `FLT_MAX` on each mod frame, including while the watch or menu is
+  hidden. It follows the current player across scene changes and skips unavailable or read-only memory.
+  The lock is off at each game launch and is not saved. Turn it off to stop writing; the game can then
+  update the threshold normally on a later jump. Turning it off does not restore an old value.
+
+These controls modify live gameplay memory. The watch itself still only reads it. This is a per-frame
+freeze, not a patch of the game's setter: writes and checks within a single game frame may still happen
+before the mod runs. Build and host tests do not establish whether this prevents every launch restriction
+in-game; test normal jumps, sidehops, jumpslashes, scene changes, and restarts on the supported game version.
 
 ### 2.9 Debug
 
@@ -251,11 +270,29 @@ gz's input display, at the bottom left (hidden while the menu is open).
 
 | Item | What it does |
 |---|---|
-| **enabled** | **L3** starts floating, **L3** again drops Link (no fall damage); hold **R3** to stay at your height; the left stick moves him. The game doesn't see L3 while this is on. |
-| **through walls** | Float through walls instead of being stopped by them. |
-| **rise speed**, **move speed** | How fast he rises and moves, in units per second. |
+| **enabled** | **L3** toggles floating. Hold **X** to rise, **B** to descend; release both to hover. The left stick moves horizontally. X/B/R3 are hidden from the game while floating; L3 is reserved while enabled. |
+| **through walls** | Use the character controller's temporary collision bypass and position setter while floating. L3/off restores its previous collision mode. Held B commands descent through floors. |
+| **vertical speed** | X/B speed in units per second, replacing the old rise-speed label. Existing saved settings remain compatible; a saved **0** uses 4 units/s for manual movement. |
+| **move speed** | Horizontal speed in units per second. |
 
 The status line under **return** shows what levitate is doing.
+
+No X/B input means hover at any vertical-speed setting. Both held together also hover; **R3**
+overrides either button to hold height. Releasing or reversing the buttons clears the previous
+vertical movement immediately. The mod menu suspends intentional movement.
+
+With **through walls** on, Link can pass through walls and ceilings; hold **B** to descend
+through floors. Exit geometry before stopping levitation, since normal collision resumes then.
+With through walls off, normal floor/wall correction remains active.
+
+**L3** ends levitation with zero vertical velocity. Normal gravity then accelerates the fall,
+and landing protection prevents fall-distance damage through the first landing. Later ordinary
+falls are unchanged. The old short health-refund timer has been removed.
+
+The user confirmed traversal through a previously blocking wall, followed by a gentle L3 fall
+and no landing damage. This does not establish behavior at every surface or during every event.
+Void protection and a void-trigger viewer are not included. Camera-follow and stationary-position
+pause behavior have not been separately fixed.
 
 #### 2.10.3 Frame advance
 

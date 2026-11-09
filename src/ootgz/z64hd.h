@@ -53,6 +53,12 @@ struct z64hd_build {
   uint32_t frame_counter;
   uint32_t actor_mgr_ptr; /* the actor manager (actors.c); 0: not known for this build */
   uint32_t vt_life;       /* the Life component's vtable */
+  /* Link's character controller (cct.c; FINDINGS "Native collision bypass"); 0: not known for this build */
+  uint32_t vt_cct_property;
+  uint32_t vt_cct_body;
+  uint32_t cct_force_no_hit;  /* void (body, bool): queued, preserves filter state */
+  uint32_t cct_set_position;  /* void (property, const vec3f_t *): updates attached bodies */
+  uint32_t cct_set_velocity;  /* void (body, const vec3f_t *): queues linear velocity */
   struct z64hd_link_path link_paths[5];
 };
 
@@ -60,6 +66,13 @@ extern const struct z64hd_build *z64hd_game;
 extern uintptr_t z64hd_main;
 
 #define MAIN(off)          (z64hd_main + (uintptr_t)(off))
+
+/* the character controller's, for the running build (0 where it isn't known) */
+#define Z64HD_VT_CCT_PROPERTY  (z64hd_game->vt_cct_property)
+#define Z64HD_VT_CCT_BODY      (z64hd_game->vt_cct_body)
+#define Z64HD_CCT_FORCE_NO_HIT (z64hd_game->cct_force_no_hit)
+#define Z64HD_CCT_SET_POSITION (z64hd_game->cct_set_position)
+#define Z64HD_CCT_SET_VELOCITY (z64hd_game->cct_set_velocity)
 #define MAIN_FN(type, off) ((type)MAIN(off))
 
 /* Structure offsets shared by the supported builds. */

@@ -62,7 +62,8 @@ These work with the menu closed.
 | **R + B + D-pad left** | Reset the timer |
 | **R + B + D-pad right** | Reset the lag counter |
 | **L3** | Levitate: start floating / drop (when it's turned on in settings) |
-| **R3** (held, while floating) | Levitate: stay at this height |
+| **X / B** (held, while floating) | Levitate up / down; release to hover |
+| **R3** (held, while floating) | Hold height even if X/B is held |
 | **L** (or **R**) | Frame advance: pause, then one frame per tap, frames continuously while held (on at first; **settings > frame advance**) |
 | **L + L3** (or **R + L3**) | Frame advance: let the game run again |
 
@@ -105,8 +106,12 @@ to add it. Or open **debug > memory**, find the value, edit the row (**L**) and 
 **scene > collision > show**. Cyan walls stop Link; red ones are walls he's inside.
 
 **...float around?**
-Turn on **settings > levitate > enabled**, close the menu, press **L3**. Push the left stick to move; hold **R3**
-to stay at your height; **L3** again to come down (no fall damage).
+Turn on **settings > levitate > enabled**, close the menu, press **L3**. Push the left stick to move; hold **X** to rise or **B** to descend. Release both to hover.
+With **through walls** enabled, Link can pass through walls and ceilings;
+held B commands descent through floors. Exit geometry before toggling floating off.
+**vertical speed** controls both directions; an old saved value of 0 uses 4 units/s for X/B.
+**L3** stops floating, restores collision and starts the fall with zero vertical speed. Normal
+gravity resumes, with fall-distance protection through the first landing. Void triggers still apply.
 
 **...look at a trick frame by frame?**
 Frame advance is on from the start (**settings > frame advance > enabled**). In the game, tap **L** to pause, tap **L** for one frame or hold it
@@ -141,7 +146,7 @@ the SD card in `sloperinaGZ/settings.ini`, plain text you can edit. Your game sa
 - **Nothing happens when I press R + right stick down.** Check the sloperinaGZ splash showed at start-up. If not,
   sloperinaGZ needs the module and the IPS for the active game build. See [INSTALLATION.md](../INSTALLATION.md).
 - **The game doesn't react to a button.** Frame advance takes **L** (or **R**) away from the game while it's on,
-  levitate takes **L3**. Turn them off in **settings** if you need those buttons.
+  levitate takes **L3**, plus **X/B/R3** while floating. Turn them off in **settings** if you need those buttons.
 - **The screen froze.** Frame advance may have paused the game: press **L + L3** (or **R + L3**).
 - **Something I ticked didn't change in the game.** Some things only show after the game redraws them: open and
   close the pause screen, or go through a loading zone. Story stages apply after a loading zone.

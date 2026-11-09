@@ -39,6 +39,7 @@ void watch_remove(int index);
 void watch_set_list(const watch_t *list, int n); /* settings; includes JS Height if missing */
 /* an entry's label, value, and display types (and its current one) */
 void watch_entry_label(const watch_entry_t *e, char *buf, int len);
+void watch_entry_display_label(const watch_entry_t *e, char *buf, int len);
 void watch_entry_text(const watch_entry_t *e, char *buf, int len);
 const char *const *watch_entry_types(const watch_entry_t *e, int *n, int *current);
 void watch_entry_set_type(int index, int type);
@@ -66,11 +67,13 @@ extern int input_size;             /* 0 small, 1 medium, 2 large: 50, 75, 100% o
 extern const char *const watches_corner_names[];
 
 void watch_text(watch_t w, char *buf, int len);
+/* Optional gameplay control: off at startup, not saved. Re-resolves the current player.
+ * Reset writes FLT_MAX once; lock repeats it each frame, even with the HUD hidden. */
+extern bool js_height_lock;
+bool js_height_reset(void); /* false if the current threshold is not readable/writable */
 void timer_toggle(void);
 void timer_reset(void);
 void lag_reset(void);
-/* JS Height back to FLT_MAX, as after a load; false if Link isn't there */
-bool js_height_reset(void);
 /* frame hook: commands (menu closed) and the on-screen panel */
 void watches_frame(bool menu_open);
 

@@ -38,6 +38,7 @@
 #define GFX_ICON_ADD '\x09'  /* gz's green + (list_icons.png tile 0): a custom watch */
 #define GFX_ICON_RIGHT '\x0B' /* arrow_icons.png tiles 2 and 3 (0x0A is the newline, so skipped) */
 #define GFX_ICON_LEFT '\x0C'
+#define GFX_ICON_LOCK '\x80' /* single-cell padlock; 0x7F is reserved for invisible panel sizing */
 
 typedef enum {
   GFX_NORMAL,

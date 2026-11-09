@@ -1,5 +1,5 @@
 /* The scene's actors: the enemies and their life, for enemyhp.c. Read from the game's disassembly
- * (FINDINGS §9.4), v131072 only so far.
+ * (FINDINGS §9.5), v131072 only so far.
  *
  * The actor manager *(main+actor_mgr_ptr) keeps the live actors in an intrusive red-black tree at
  * [mgr+0x38]: node N has left at +0x00, right at +0x08; each node sits at +8 in an entry E, which holds
@@ -36,7 +36,7 @@
 
 /* states: below 2 not started (the game's walks skip them), 3 being set up, 4 and 5 running, 6 not yet
  * appeared (a Wolfos still in the ground, Stalfos before they drop, Poes before they show), 7..11 dying
- * or gone (FINDINGS §9.4) */
+ * or gone (FINDINGS §9.5) */
 #define STATE_RUNNING 4
 #define STATE_RUNNING_LAST 5
 

@@ -32,6 +32,31 @@ and sdk are known to export). A function we call but forgot to define would othe
 import and only fail when the game loads the module. Add a symbol there only after checking that
 main or sdk exports it.
 
+### JS Height host tests
+
+`python tests/run_js_height.py --cc C:/msys64/mingw64/bin/gcc.exe` runs the watch, settings, and
+HUD code on a 64-bit Windows host. With GCC on PATH, use `python tests/run_js_height.py` instead.
+It checks the pointer chain and f32 formatting, compatibility with old settings, HUD visibility,
+one-shot reset, lock/unlock, read-only/unavailable targets, exact four-byte writes, and relocation.
+It also draws a real menu and checks that invisible panel-sizing markers do not become lock icons.
+The game and SD filesystem are mocked; this does not verify the game's setter/check ordering.
+
+### Levitation host tests
+
+`python tests/run_levitate.py --cc C:/msys64/mingw64/bin/gcc.exe` runs the real levitation step/frame
+logic with a simulated physics record. It checks upward floor corrections, downward drift, wall
+push-back handling, hover, rising platforms, X/B ascent/descent, direction reversal, both-button/R3
+hold, manual descent past upward floor corrections, button masking, menu/drop and record loss/restart.
+Release tests cover the controller velocity reset, guarded fall-history reset, protection through long drops,
+and ending protection after supported landing. Invalid records are skipped. These tests
+do not simulate the game's collision solver; verify surfaces and transitions in-game separately.
+
+The same command also runs `tests/cct.c`: dynamic controller resolution, exact object types,
+queued collision state, preserving an existing no-hit mode, restoration/retry, replacement,
+invalid lists and non-finite positions. Its game API calls are mocked. The user confirmed the 0.0.9 test build passes a previously blocking wall
+and test2 gives a gentle L3 fall with no landing damage. Logs show the queued velocity reset and
+protection ending after landing. Other surfaces, events and scene transitions need broader testing.
+
 
 ## Layout
 

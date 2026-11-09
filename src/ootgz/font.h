@@ -5,7 +5,7 @@
 #include <stdint.h>
 
 #define FONT_FIRST 33
-#define FONT_COUNT 94
+#define FONT_COUNT 96
 #define FONT_W 8
 #define FONT_H 8
 

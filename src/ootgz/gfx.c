@@ -264,6 +264,7 @@ static char plain_char(char ch)
     case GFX_ICON_UP: return '^';
     case GFX_ICON_DOWN: return 'v';
     case GFX_ICON_ADD: return '+';
+    case (char)GFX_ICON_LOCK: return 'L';
     case GFX_ICON_LEFT: return '<';
     case GFX_ICON_RIGHT: return '>';
     case 0:

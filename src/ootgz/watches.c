@@ -1,5 +1,7 @@
 #include "watches.h"
 
+#include <float.h>
+
 #include "airwall.h"
 #include "gamedata.h"
 #include "gfx.h"
@@ -364,9 +366,9 @@ static uintptr_t js_height_addr(void)
 bool js_height_reset(void)
 {
   uintptr_t a = js_height_addr();
-  if (!a || !sys_mapped(a, 4, SYS_PERM_W))
+  if (!a || !sys_mapped(a, sizeof(float), SYS_PERM_R | SYS_PERM_W))
     return false;
-  *(volatile uint32_t *)a = 0x7F7FFFFFu; /* FLT_MAX */
+  *(volatile float *)a = FLT_MAX;
   return true;
 }
 
@@ -409,6 +411,8 @@ static bool js_height(float *out)
   memcpy(out, &bits, sizeof(*out));
   return true;
 }
+
+bool js_height_lock; /* opt-in for this session; never enabled by loading settings */
 
 static const struct { uint32_t bit; const char *name; } button_names[] = {
   { BTN_A, "A" }, { BTN_B, "B" }, { BTN_X, "X" }, { BTN_Y, "Y" }, { BTN_L, "L" }, { BTN_R, "R" },
@@ -625,9 +629,12 @@ void watch_text(watch_t watch, char *buf, int len)
       break;
     case W_JS_HEIGHT: {
       float height;
-      if (js_height(&height))
-        snprintf(buf, len, "%.9g", (double)height); /* full f32 precision, compact even at FLT_MAX */
-      else
+      if (js_height(&height)) {
+        if (height == FLT_MAX)
+          snprintf(buf, len, "%s", T("Max"));
+        else
+          snprintf(buf, len, "%.9g", (double)height);
+      } else
         snprintf(buf, len, "N/A");
       break;
     }
@@ -646,6 +653,17 @@ void watch_entry_label(const watch_entry_t *entry, char *buf, int len)
     snprintf(buf, len, "%010lx", (unsigned long)entry->addr);
   else
     snprintf(buf, len, "%s", T(watch_labels[entry->id]));
+}
+
+/* Keep status decorations out of the editable/saved name. Fit the existing 12-cell column. */
+void watch_entry_display_label(const watch_entry_t *e, char *buf, int len)
+{
+  char label[24];
+  watch_entry_label(e, label, sizeof(label));
+  if (e->id == W_JS_HEIGHT && js_height_lock)
+    snprintf(buf, len, "%.10s %c", label, GFX_ICON_LOCK);
+  else
+    snprintf(buf, len, "%s", label);
 }
 
 /* gz's watch: the value at the address, as its type; "-" if it isn't readable */
@@ -820,6 +838,10 @@ static void command_input(void)
 
 void watches_frame(bool menu_open)
 {
+  /* A frame-level freeze, not a patch of the game's threshold setter. Keep it independent
+   * of watch visibility. Invalid chains are skipped and retried on the next frame. */
+  if (js_height_lock)
+    js_height_reset();
   input_display_frame(menu_open);
   measure_motion();
   if (!lag_started) {
@@ -841,7 +863,7 @@ void watches_frame(bool menu_open)
     char label[24];
     if (watch_list[i].hidden)
       continue;
-    watch_entry_label(&watch_list[i], label, sizeof(label));
+    watch_entry_display_label(&watch_list[i], label, sizeof(label));
     watch_entry_text(&watch_list[i], value, sizeof(value));
     snprintf(line, sizeof(line), "%-12.12s %.40s", label, value);
     gfx_hud((gfx_corner_t)watches_corner, row++, GFX_NORMAL, line);

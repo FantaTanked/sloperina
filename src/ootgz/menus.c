@@ -1392,12 +1392,20 @@ static void act_lag_reset(menu_item_t *it)
   lag_reset();
 }
 
+/* --- watches: the list ------------------------------------------------------------------------------ */
+
 static void act_js_height_reset(menu_item_t *it)
 {
-  gfx_notice(js_height_reset() ? "JS Height reset" : "JS Height: Link not found");
+  gfx_notice(js_height_reset() ? "JS Height reset to maximum" : "JS Height unavailable or read-only");
 }
 
-/* --- watches: the list ------------------------------------------------------------------------------ */
+static bool get_js_height_lock(menu_item_t *it) { return js_height_lock; }
+static void set_js_height_lock(menu_item_t *it, bool on)
+{
+  js_height_lock = on;
+  if (on && !js_height_reset())
+    gfx_notice("JS Height lock: waiting for writable player");
+}
 
 /* A row of the list, gz's buttons: the red cross (remove); the wrench (show the value in debug >
  * memory) when it has an address; the label (rename it with gz's keyboard); the type switch; then
@@ -1453,7 +1461,7 @@ static void watch_row(menu_item_t *it, char *buf, int len)
   char label[WATCH_LABEL_SIZE], value[48];
   int n_types, current;
   const char *const *types = watch_entry_types(entry, &n_types, &current);
-  watch_entry_label(entry, label, sizeof(label));
+  watch_entry_display_label(entry, label, sizeof(label));
   watch_entry_text(entry, value, sizeof(value));
   snprintf(buf, len, "%c%c %c %-12.12s %s%-3s%s %-*.*s %c %c", entry->hidden ? GFX_CHECK_OFF : GFX_CHECK_ON,
            GFX_WIDE_REST, watch_entry_has_address(entry) ? GFX_ICON_WRENCH : ' ', label, n_types ? "< " : "  ",
@@ -1479,7 +1487,7 @@ static bool watch_cursor(menu_item_t *it, const char *line, int *start, int *len
       return true;
     case PART_LABEL: {
       char label[WATCH_LABEL_SIZE];
-      watch_entry_label(&watch_list[it->data], label, sizeof(label));
+      watch_entry_display_label(&watch_list[it->data], label, sizeof(label));
       *start = COL_LABEL;
       *len = clamp_int((int)strlen(label), 1, WATCH_LABEL_W);
       return true;
@@ -1544,7 +1552,7 @@ static void watch_press(menu_item_t *it, int part)
     return;
   watch_entry_t *entry = &watch_list[index];
   char label[WATCH_LABEL_SIZE];
-  watch_entry_label(entry, label, sizeof(label));
+  watch_entry_display_label(entry, label, sizeof(label));
   int button = row_part(it);
   switch (button) {
     case PART_REMOVE:
@@ -1790,13 +1798,17 @@ static void fill_watches(void)
   menu_add_heading(&m_watches, "watches");
   add_watch_rows();
   add_watch_tools(on_tools, tools_part);
+  menu_add_heading(&m_watches, "JS Height");
+  menu_item_t *reset_js = menu_add_action(&m_watches, "Reset JS Height", act_js_height_reset, 0);
+  if (reset_js)
+    reset_js->hint = "L: set the threshold to maximum once (also R + A + d-right)";
+  menu_item_t *lock_js = menu_add_check(&m_watches, "Lock JS Height", get_js_height_lock, set_js_height_lock, 0);
+  if (lock_js)
+    lock_js->hint = "Keep maximum height each frame; off after restarting";
   menu_add_heading(&m_watches, "timer");
   menu_add_action(&m_watches, "start/stop timer", act_timer_toggle, 0);
   menu_add_action(&m_watches, "reset timer", act_timer_reset, 0);
   menu_add_action(&m_watches, "reset lag counter", act_lag_reset, 0);
-  menu_item_t *jh = menu_add_action(&m_watches, "reset JS Height (R + A + d-right)", act_js_height_reset, 0);
-  if (jh)
-    jh->hint = "L: back to FLT_MAX, as after a load (any height)";
   menu_add_return(&m_watches);
   menu_refresh(&m_watches);
   /* the cursor keeps to the same button of whatever row it's now on */
@@ -1814,7 +1826,7 @@ void watches_sync(void)
 
 static void build_watches(void)
 {
-  menu_init(&m_watches, "watches", WATCH_ROWS + 16);
+  menu_init(&m_watches, "watches", WATCH_ROWS + 19);
   fill_watches();
   menu_init(&m_watch_add, "known watches", W_COUNT + 1);
   m_watch_add.parent = &m_watches; /* opened from the folder button */
@@ -2025,8 +2037,8 @@ static void set_input_buttons(menu_item_t *it, bool on)
 }
 
 /* levitate */
-static const char *const lev_speed_names[] = { "2", "4", "6", "8", "12", "20" };
-static const int lev_speeds[] = { 2, 4, 6, 8, 12, 20 };
+static const char *const lev_speed_names[] = { "0", "2", "4", "6", "8", "12", "20" };
+static const int lev_speeds[] = { 0, 2, 4, 6, 8, 12, 20 };
 static const char *const lev_move_names[] = { "2", "4", "6", "8", "12", "20", "30" };
 static const int lev_moves[] = { 2, 4, 6, 8, 12, 20, 30 };
 
@@ -2171,20 +2183,20 @@ static void build_levitate(void)
 {
   menu_init(&m_levitate, "levitate", 9);
   menu_add_heading(&m_levitate, "levitation options");
-  menu_item_t *enabled = menu_add_check(&m_levitate, "enabled", get_levitate, set_levitate, 0);
-  if (enabled) {
-    enabled->hint = "L3: start/stop floating   R3: hold height";
-    enabled->log_label = "levitate";
-  }
-  menu_add_check(&m_levitate, "through walls", get_walls, set_walls, 0);
-  menu_add_option(&m_levitate, "rise speed", ARRAY_LEN(lev_speed_names), lev_speed_names, get_lev_speed,
-                  set_lev_speed, 0);
-  menu_add_option(&m_levitate, "move speed", ARRAY_LEN(lev_move_names), lev_move_names, get_lev_move, set_lev_move,
-                  0);
+  menu_item_t *lv = menu_add_check(&m_levitate, "enabled", get_levitate, set_levitate, 0);
+  if (lv)
+    lv->hint = "L3: toggle   X: up   B: down   release: hover", lv->log_label = "levitate";
+  menu_item_t *walls = menu_add_check(&m_levitate, "through walls", get_walls, set_walls, 0);
+  if (walls)
+    walls->hint = "Disable Link collision while floating; B descends through floors";
+  menu_item_t *rise = menu_add_option(&m_levitate, "vertical speed", 7, lev_speed_names, get_lev_speed, set_lev_speed, 0);
+  if (rise)
+    rise->hint = "X/B speed; legacy 0 uses 4. Release to hover";
+  menu_add_option(&m_levitate, "move speed", 7, lev_move_names, get_lev_move, set_lev_move, 0);
   menu_end_group(&m_levitate);
   menu_add_return(&m_levitate);
   /* what can only be read, under return after a blank line */
-  add_blank_line(&m_levitate);
+  menu_add_text(&m_levitate, text_static, (intptr_t) "");
   menu_add_text(&m_levitate, text_levitate, 0);
 }
 
