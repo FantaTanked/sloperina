@@ -2,9 +2,11 @@
  * camera (view.c); over each one's head goes a bar (dark back, green fill, red below a quarter) with
  * "life/max" above it in seven-segment digits, all as rectangles that nvn.c clears into the picture
  * (no shaders, no font). An enemy at 0 life has no bar; actors.c leaves out those that haven't
- * appeared yet. Each drop in an enemy's life goes to the log file ("enemy hp:" lines). */
+ * appeared yet. Nothing is drawn while the game is paused (its pause screen or an item menu), as the
+ * air walls. Each drop in an enemy's life goes to the log file ("enemy hp:" lines). */
 #include "enemyhp.h"
 
+#include "gamedata.h"
 #include "link.h"
 #include "sys.h"
 #include "view.h"
@@ -165,7 +167,7 @@ void enemyhp_frame(void)
     log_hits(enemies, n_enemies);
     vec3f_t link;
     view_cam_t cam;
-    if (link_drawn_pos(&link) && view_camera(&cam)) {
+    if (!gd_game_paused(0, 0) && link_drawn_pos(&link) && view_camera(&cam)) {
       for (int i = 0; i < n_enemies; i++) {
         const enemy_t *e = &enemies[i];
         float dx = e->pos[0] - link.x, dy = e->pos[1] - link.y, dz = e->pos[2] - link.z;
