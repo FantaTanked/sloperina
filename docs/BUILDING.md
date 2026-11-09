@@ -18,12 +18,13 @@ make            # or ./docker-make
 make dist       # or ./docker-make dist
 ```
 
-Outputs, per game version (only `v131072` exists so far):
+Outputs:
 
 | File | What |
 |---|---|
-| `bin/v131072/subsdk9` | the module (NSO), added to the game's exefs |
-| `bin/v131072/E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips` | IPS32 patch for main (67 bytes) |
+| `bin/subsdk9` | the shared module (NSO), added to the game's exefs |
+| `bin/33FA6C2C23848282A77E8B88A0A93F4887C55920.ips` | 1.0.0 main patch |
+| `bin/E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips` | 1.1.1 main patch |
 | `dist/` | install trees, see [INSTALLATION.md](../INSTALLATION.md) |
 
 The link fails if the module imports a symbol that isn't in `lib/imports.txt` (the functions main
@@ -38,7 +39,7 @@ Mirrors gz (`gz/src/gz`, `gz/lib`, the Makefile's version list):
 
 | Path | gz equivalent | What |
 |---|---|---|
-| `src/ootgz/z64hd.h`, `z64hd_v131072.h` | `z64.h`, `lib/liboot-*.a` | game addresses for one version, as main offsets |
+| `src/ootgz/z64hd.h`, `z64hd_builds.h` | `z64.h`, `lib/liboot-*.a` | shared structure layouts and a table of main offsets per build |
 | `src/ootgz/ootgz.c` | `gz.c` | module init, frame hook, menu tree |
 | `src/ootgz/crt0.S`, `lib/ootgz.ld` | `hdr.S`, `ldr.S`, `gz.ld` | module header (MOD0) and linker script |
 | `src/ootgz/menu.c`, `gfx.c` | `menu*.c`, `gfx.c` | menu model; text screen shared with the renderer (log fallback) |
@@ -52,23 +53,19 @@ Mirrors gz (`gz/src/gz`, `gz/lib`, the Makefile's version list):
 
 ## How it loads
 
-Two files, both of which LayeredFS (Atmosphère) and Lichii/Eden's `load/` folder can add
-without touching the game's files:
+The emulator or LayeredFS adds the shared `subsdk9` and applies the IPS whose filename matches
+main's build ID. Both patches can be installed together.
 
-1. **`subsdk9`**: the game's exefs has `rtld`, `main`, `subsdk0` (movie) and `sdk`;
-   `subsdk1`-`9` are free. rtld loads every module present, links imports by name and calls
-   each module's `DT_INIT`. ootgz imports `nnMain` from main (to find main's base: no memory
-   scanning) and `nn::hid`, `vsnprintf`, `memcpy`... from sdk. It exports nothing.
-2. **The IPS** patches three things in main:
-   - `main+0x3c46400`: marker `OOTGZ\0\0\0` + patch version (the module checks it)
-   - `main+0x3c46440`: a 5-instruction stub: load the pointer in `main+0x4e9a4d0`; if set,
-     jump to it, else run the original GameData unlock
-   - `main+0x3b500dc`: the per-frame "unlock GameData" tail call → the stub (the same site and
-     cave the old patch used, FINDINGS §3)
-
-   `ootgz_module_init` (DT_INIT) checks the marker, version, site and that the slot is empty,
-   then stores `ootgz_frame_entry` in the slot. The stub falls back to the original code if the
-   module is missing, so the IPS alone is harmless.
+1. **`subsdk9`** is linked by the game's rtld, which resolves the import of `nnMain` and runs
+   `ootgz_module_init` via `DT_INIT`. The module identifies the build using the exported
+   `nnMain` address and its matching MOD0 header offset.
+2. **The IPS** writes a marker with the patch format and game revision, a stub in executable
+   padding, and a branch from the GameData unlock site to that stub. The stub loads the hook
+   pointer from the build's reserved slot and falls back to the original unlock until the
+   pointer is set.
+3. The module validates the marker, patched branch, and empty writable slot before installing
+   the hook and using the selected table. An unknown build or a missing or mismatched patch
+   leaves the hook inactive.
 
 The module runs exactly where the old assembly hook ran: the game's thread, once per frame,
 with GameData just flushed and unlocked. So everything `patch.py` did through the mailbox
@@ -80,8 +77,8 @@ What changed from the Python version:
 
 | Python (emulator) | Native |
 |---|---|
-| finds guest base + main by scanning Lichii's process | `&nnMain - 0x1202cd0` |
-| finds GameData Int/Bool/Enum/String tables by heap scans | type entries inside the GameData manager (`**[main+0x4c7e180]`, Int entry at `+0xC8`; layout from GetInt) |
+| finds guest base + main by scanning Lichii's process | `&nnMain - build->nnmain`, checked against MOD0 |
+| finds GameData Int/Bool/Enum/String tables by heap scans | type entries inside the GameData manager (Int at `+0xC8`, String64 at `+0x608`) |
 | one mailbox request per frame, polled by a worker thread | direct calls; `job.c` keeps one step per frame |
 | XInput/keyboard on Windows | `nn::hid::detail::GetNpadStates` from the game's sdk |
 | Tk overlay window | `gfx.h`: log backend now, on-screen backend next |
@@ -118,7 +115,7 @@ Lichii runs the game's own rtld, so a working load there is good evidence for ha
 1. **The module loads and the hook runs.** Remove the old `load/0400486024DEC000/ootmenu`
    patch first (same site). Turn on Lichii's log with the emulated debug output category at
    Debug level (yuzu-family logs `svcOutputDebugString` under `Debug.Emulated`). Expect
-   `ootgz: frame hook installed` at boot and `ootgz: running (patch v1, main 0x…)` once in game.
+   `sloperinaGZ: frame hook installed` at boot and `sloperinaGZ: running on game <version> (patch v2, main 0x…)` once in game.
    If nothing appears, check whether rtld calls `DT_INIT` for subsdk modules on this system,
    and whether `__nx_module_runtime` (0x200 bytes) is enough for the Switch 2 rtld.
 2. **The slot is really unused.** Set a write watchpoint on `main+0x4e9a4d0`..`+8` with the
@@ -126,10 +123,9 @@ Lichii runs the game's own rtld, so a working load there is good evidence for ha
    If the game does, pick another address and change `Z64HD_HOOK_SLOT`.
 3. **Input.** Open the menu with **R + right stick down**; the log prints the menu. If nothing
    reacts, check the `npad_state_t` layout in `input.c` (buttons at +8, attributes at +0x20).
-4. **GameData types.** Bool/Enum/Float entries are assumed to share the Int entry's layout
-   (table size at `+0x24`); String64 is found from the `Sequence_CurrentBanc` pair the way
-   `game.py` does it, but searched among the manager's type entries. The link menu shows the
-   map name if strings work.
+4. **GameData types.** Bool/Enum/Float entries share the Int entry's layout (table size at
+   `+0x24`). String64 uses the game's hash table and follows the value pointer from its
+   object. The link menu shows the map name if strings work.
 5. **Features.** Compare with ootmenu: upgrades (wallet first, it's the verified one), ocarina
    give/remove, the cheats.
 6. **Drawing and hidden input** (see "Drawing" below): expect `NVN hook installed`,
@@ -177,7 +173,7 @@ the `Sequence_Reserved*` GameData (String64 indexes 0x20-0x23 are `ReservedBootE
 `Sequence_ControlInEvent` = `ChangeBancOnEvent`, which the Event sequence turns into the map change.
 The request is built like the `SeqOneShotRequestEvent` node does (`main+0x32db1a0`): constructor
 `main+0xd79f10`, params as `QueryBancChangeEventRequestArg` fills them (`main+0x29bf380`), submit
-`main+0xd7a820(**[main+0x4c7e090], &request)`; layout in `z64hd_v131072.h`. If the game hasn't
+`main+0xd7a820(**[main+0x4c7e090], &request)` in 1.1.1. The layout is in `z64hd.h`. If the game hasn't
 reserved the map within 90 frames, the warp falls back to swapping the next exit Link takes.
 
 ## Next steps

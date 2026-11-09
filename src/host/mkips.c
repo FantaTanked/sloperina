@@ -4,7 +4,7 @@
  *
  * The patch (offsets are main offsets + 0x100, the NSO header, as Atmosphère and Lichii/Eden
  * expect; see FINDINGS §3):
- *   CAVE_START          "OOTGZ\0\0\0" + u32 version + 4 zero bytes (the module checks this)
+ *   CAVE_START          "OOTGZ\0\0\0" + u32 version + u32 revision (the module checks this)
  *   CAVE_START + 0x40   stub:  adrp x16, slot ; ldr x16, [x16, #slot_lo]
  *                              cbz  x16, 1f   ; br  x16
  *                          1:  b    unlock               (original behaviour until hooked)
@@ -16,14 +16,14 @@
 #include <string.h>
 
 #include "../ootgz/ootgz_version.h"
-#include "../ootgz/z64hd_v131072.h"
+#include "../ootgz/z64hd_builds.h"
 
 #define NSO_HEADER 0x100
 
 #define X16         16 /* the stub's scratch register (IP0: free to clobber at a branch) */
 #define STUB_INSNS  5
 #define STUB_SIZE   (STUB_INSNS * 4)
-#define MARKER_SIZE 16 /* OOTGZ_MARKER (8), the version (4), 4 zero bytes */
+#define MARKER_SIZE 16 /* OOTGZ_MARKER (8), the version (4), the revision (4) */
 
 /* --- AArch64 instruction encodings --------------------------------------------------------- */
 
@@ -81,27 +81,47 @@ int main(int argc, char **argv)
     fprintf(stderr, "usage: mkips <out.ips>\n");
     return 1;
   }
-  _Static_assert((Z64HD_HOOK_SLOT & 7) == 0, "slot must be 8-aligned");
-  _Static_assert(Z64HD_CAVE_START + OOTGZ_STUB_OFF + STUB_SIZE <= Z64HD_CAVE_END, "stub outside cave");
+  const char *name = argv[1];
+  for (const char *p = name; *p; p++)
+    if (*p == '/' || *p == '\\')
+      name = p + 1;
+  const struct z64hd_build *build = NULL;
+  for (size_t i = 0; i < sizeof(z64hd_builds) / sizeof(*z64hd_builds); i++) {
+    const char *id = z64hd_builds[i].build_id;
+    size_t len = strlen(id);
+    if (strncmp(name, id, len) == 0 && strcmp(name + len, ".ips") == 0) {
+      build = &z64hd_builds[i];
+      break;
+    }
+  }
+  if (!build) {
+    fprintf(stderr, "unknown game build ID in patch filename: %s\n", name);
+    return 1;
+  }
+  if ((build->hook_slot & 7) || build->cave_start + OOTGZ_STUB_OFF + STUB_SIZE > build->cave_end) {
+    fprintf(stderr, "invalid hook slot or code cave for %s\n", build->version);
+    return 1;
+  }
 
   uint8_t marker[MARKER_SIZE] = { 0 };
   memcpy(marker, OOTGZ_MARKER, 8);
   put_le32(marker + 8, OOTGZ_PATCH_VERSION);
+  put_le32(marker + 12, build->revision);
 
-  uint32_t stub_at = Z64HD_CAVE_START + OOTGZ_STUB_OFF;
+  uint32_t stub_at = build->cave_start + OOTGZ_STUB_OFF;
   uint32_t code[STUB_INSNS] = {
-    insn_adrp(X16, stub_at, Z64HD_HOOK_SLOT),
-    insn_ldr_x(X16, X16, Z64HD_HOOK_SLOT & 0xFFF),
+    insn_adrp(X16, stub_at, build->hook_slot),
+    insn_ldr_x(X16, X16, build->hook_slot & 0xFFF),
     insn_cbz_x(X16, stub_at + 8, stub_at + 16), /* no hook yet: to the original branch */
     insn_br(X16),
-    insn_b(stub_at + 16, Z64HD_GD_UNLOCK),
+    insn_b(stub_at + 16, build->gd_unlock),
   };
   uint8_t stub[STUB_SIZE];
   for (int i = 0; i < STUB_INSNS; i++)
     put_le32(stub + 4 * i, code[i]);
 
   uint8_t site[4];
-  put_le32(site, insn_b(Z64HD_FRAME_SITE, stub_at));
+  put_le32(site, insn_b(build->frame_site, stub_at));
 
   FILE *f = fopen(argv[1], "wb");
   if (!f) {
@@ -109,9 +129,9 @@ int main(int argc, char **argv)
     return 1;
   }
   fwrite("IPS32", 1, 5, f);
-  write_record(f, Z64HD_CAVE_START, marker, sizeof(marker));
+  write_record(f, build->cave_start, marker, sizeof(marker));
   write_record(f, stub_at, stub, sizeof(stub));
-  write_record(f, Z64HD_FRAME_SITE, site, sizeof(site));
+  write_record(f, build->frame_site, site, sizeof(site));
   fwrite("EEOF", 1, 4, f);
   if (fclose(f) != 0) {
     perror(argv[1]);

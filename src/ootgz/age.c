@@ -115,20 +115,20 @@ static const spawn_t *find_reload_spawn(const warp_map_t *map, const char *last_
 
 /* --- age --------------------------------------------------------------------------------------- */
 
-static void swap_strings(int index_a, int index_b)
+static void swap_strings(uint32_t hash_a, uint32_t hash_b)
 {
-  const char *value_a = gd_get_str(index_a);
-  const char *value_b = gd_get_str(index_b);
+  const char *value_a = gd_get_str(hash_a);
+  const char *value_b = gd_get_str(hash_b);
   if (!value_a || !value_b)
     return;
   char copy_a[GD_STR_LEN], copy_b[GD_STR_LEN];
   snprintf(copy_a, sizeof(copy_a), "%s", value_a);
   snprintf(copy_b, sizeof(copy_b), "%s", value_b);
-  gd_set_str(index_a, copy_b);
-  gd_set_str(index_b, copy_a);
+  gd_set_str(hash_a, copy_b);
+  gd_set_str(hash_b, copy_a);
 }
 
-static void take_off_adult_only(int slot)
+static void take_off_adult_only(uint32_t slot)
 {
   const char *item = gd_get_str(slot);
   if (item && starts_with(item, "Armor_Adult_"))
@@ -137,15 +137,10 @@ static void take_off_adult_only(int slot)
 
 static void apply_age(int age)
 {
-  int other_weapon = gd_str_index(F_OTHER_WEAPON);
-  int other_shield = gd_str_index(F_OTHER_SHIELD);
-  log_printf("age: %s (sword %s, shield %s; other age's %d, %d)", age == AGE_CHILD ? "child" : "adult",
-             or_unknown(gd_get_str(GD_STR_SWORD)), or_unknown(gd_get_str(GD_STR_SHIELD)), other_weapon,
-             other_shield);
-  if (other_weapon >= 0)
-    swap_strings(GD_STR_SWORD, other_weapon);
-  if (other_shield >= 0)
-    swap_strings(GD_STR_SHIELD, other_shield);
+  log_printf("age: %s (sword %s, shield %s)", age == AGE_CHILD ? "child" : "adult",
+             or_unknown(gd_get_str(GD_STR_SWORD)), or_unknown(gd_get_str(GD_STR_SHIELD)));
+  swap_strings(GD_STR_SWORD, F_OTHER_WEAPON);
+  swap_strings(GD_STR_SHIELD, F_OTHER_SHIELD);
   if (age == AGE_CHILD) {
     take_off_adult_only(GD_STR_TUNIC);
     take_off_adult_only(GD_STR_BOOTS);

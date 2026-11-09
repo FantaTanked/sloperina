@@ -39,15 +39,20 @@ bool      gd_set_float(uint32_t hash, float value);
 bool      gd_get_enum(uint32_t hash, uint32_t *out);  /* value = murmur3(choice) */
 bool      gd_set_enum(uint32_t hash, uint32_t value);
 
-/* String64 fields by index (game.py STR_IDX). */
-enum {
-  GD_STR_TUNIC = 0x10, GD_STR_ARROW = 0x11, GD_STR_BOOTS = 0x12, GD_STR_OCARINA = 0x15,
-  GD_STR_SHIELD = 0x16, GD_STR_SWORD = 0x17, GD_STR_MAP = 0x1F, GD_STR_EVENT = 0x20,
-  GD_STR_STARTER = 0x21, GD_STR_NEXT_MAP = 0x22, GD_STR_SPAWN = 0x23,
-};
+/* String64 field hashes. Their array indices can change when a game update adds fields. */
+#define GD_STR_TUNIC    0x008D7F0Cu
+#define GD_STR_ARROW    0x3615E379u
+#define GD_STR_BOOTS    0xD107A85Du
+#define GD_STR_OCARINA  0xB72CD3FCu
+#define GD_STR_SHIELD   0xEE463235u
+#define GD_STR_SWORD    0xA95A3521u
+#define GD_STR_MAP      0x1D6189DAu
+#define GD_STR_EVENT    0xA242CCC2u
+#define GD_STR_STARTER  0x3AD1FD51u
+#define GD_STR_NEXT_MAP 0xEE27BF71u
+#define GD_STR_SPAWN    0x0B570AB2u
 #define GD_STR_LEN 64
-const char *gd_get_str(int idx);           /* NULL if not found */
-bool        gd_set_str(int idx, const char *s);
-int         gd_str_index(uint32_t hash);   /* a String64 field's index by name hash, or -1 */
+const char *gd_get_str(uint32_t hash); /* hash 0 returns the first string for the memory viewer */
+bool        gd_set_str(uint32_t hash, const char *s);
 
 #endif

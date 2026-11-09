@@ -52,7 +52,7 @@ BUTTON_ITEM = {"Fairy Slingshot": "SlingShot", "Fairy Bow": "Bow", "Arrow Fire":
                "Hookshot": "Hookshot", "Longshot": "Longshot", "Hammer": "Hammer",
                "Lens of Truth": "GlassTruth", "Din’s Fire": "DinFire", "Farore’s Wind": "FaroreWind",
                "Nayru’s Love": "NayruLove", "Iron Boots": "HeavyBoot", "Hover Boots": "HoverBoot"}
-# equipment slot -> the gamedata.h index of the String64 save field that holds what is worn there
+# equipment slot -> the gamedata.h hash of the String64 save field that holds what is worn there
 GD_STR = {"sword": "GD_STR_SWORD", "shield": "GD_STR_SHIELD", "tunic": "GD_STR_TUNIC", "boots": "GD_STR_BOOTS"}
 # gear title -> (equipment slot, the value that slot holds when it is worn)
 WORN_GEAR = {"Kokiri Sword": ("sword", "Weapon_Sword_Kokiri"), "Master Sword": ("sword", "Weapon_Sword_Master"),
@@ -243,7 +243,7 @@ class DataWriter:
         """An inv_item_t row for an item with an owned flag (and maybe a button item and a worn slot)."""
         field_hash, field_type = self.fields.get(title, (0, "Int"))
         slot, worn = WORN_GEAR.get(title, (None, None))
-        slot_string = GD_STR[slot] if slot else -1
+        slot_string = GD_STR[slot] if slot else 0
         return (f"  {{ {c_string(label_of(title))}, {kind}, {self.field(field_hash, field_type)}, "
                 f"{self.acquired_hash(title)}, {c_string(BUTTON_ITEM.get(title))}, {slot_string}, {c_string(worn)} }},")
 
@@ -267,12 +267,12 @@ def write_items(out):
     for kind, title in ITEM_SCREEN:
         if kind == "trade":
             trade_kind = "IK_TRADE_CHILD" if title == "child" else "IK_TRADE_ADULT"
-            out.write(f"  {{ {c_string(title + ' trade')}, {trade_kind}, {NO_FIELD}, 0, NULL, -1, NULL }},")
+            out.write(f"  {{ {c_string(title + ' trade')}, {trade_kind}, {NO_FIELD}, 0, NULL, 0, NULL }},")
         elif kind == "ocarina":
-            out.write(f'  {{ "ocarina", IK_OCARINA, {NO_FIELD}, 0, NULL, -1, NULL }},')
+            out.write(f'  {{ "ocarina", IK_OCARINA, {NO_FIELD}, 0, NULL, 0, NULL }},')
         elif kind == "acquired":
             out.write(f"  {{ {c_string(label_of(title))}, IK_ACQUIRED, {NO_FIELD}, {out.acquired_hash(title)}, "
-                      f"NULL, -1, NULL }},")
+                      f"NULL, 0, NULL }},")
         else:
             out.write(out.inv_item(title, "IK_OWNED"))
     out.end_array("data_items")

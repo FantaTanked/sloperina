@@ -1,7 +1,7 @@
 #!/bin/sh
 # Build sloperinaGZ and pack a release: release/sloperinaGZ-<version>.zip, holding
 #   install.bat, install.ps1, install.sh       the installers (see INSTALLATION.md)
-#   files/subsdk9, files/<build id>.ips          the module and the patch that loads it
+#   files/subsdk9, files/<build id>.ips          the module and both game-version patches
 #   files/lang/template.json                     the translation template
 #   files/atmosphere/, files/exefs/              the same files laid out for copying by hand
 #   README.md, INSTALLATION.md, USAGE.md, MANUAL.md, CONTRIBUTORS.md, THANKS.md, LICENSE (if there is one)
@@ -12,10 +12,10 @@ VERSION=$(cat VERSION)
 OUT=release/sloperinaGZ-$VERSION
 rm -rf "$OUT" "$OUT.zip"
 mkdir -p "$OUT/files/lang"
-cp dist/exefs/v131072/* "$OUT/files/"
+cp dist/exefs/* "$OUT/files/"
 cp lang/template.json "$OUT/files/lang/"
 cp -r dist/atmosphere "$OUT/files/"
-mkdir -p "$OUT/files/exefs" && cp dist/exefs/v131072/* "$OUT/files/exefs/"
+mkdir -p "$OUT/files/exefs" && cp dist/exefs/* "$OUT/files/exefs/"
 cp scripts/install.bat scripts/install.ps1 scripts/install.sh "$OUT/"
 cp README.md INSTALLATION.md CONTRIBUTORS.md THANKS.md docs/USAGE.md docs/MANUAL.md "$OUT/"
 [ -f LICENSE ] && cp LICENSE "$OUT/"

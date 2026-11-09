@@ -24,14 +24,13 @@
 #define EQUIP_OWNER_COMPONENT 0x470
 #define LINK_NEARBY_BYTES 0x2000  /* how much of Link's actor to look through for pointers */
 
-static const struct { uint32_t static_ptr, offset; } linkobj_ptrs[] = Z64HD_LINKOBJ_PTRS;
-
 uintptr_t link_actor(void)
 {
-  for (unsigned i = 0; i < sizeof(linkobj_ptrs) / sizeof(*linkobj_ptrs); i++) {
-    uintptr_t holder = sys_ptr(MAIN(linkobj_ptrs[i].static_ptr));
-    uintptr_t actor = holder ? sys_ptr(holder + linkobj_ptrs[i].offset) : 0;
-    if (actor && sys_ptr(actor) == MAIN(Z64HD_VT_LINKOBJ))
+  const struct z64hd_link_path *paths = z64hd_game->link_paths;
+  for (unsigned i = 0; i < sizeof(z64hd_game->link_paths) / sizeof(*paths) && paths[i].global; i++) {
+    uintptr_t holder = sys_ptr(MAIN(paths[i].global));
+    uintptr_t actor = holder ? sys_ptr(holder + paths[i].member) : 0;
+    if (actor && sys_ptr(actor) == MAIN(z64hd_game->vt_linkobj))
       return actor;
   }
   return 0;
@@ -48,8 +47,8 @@ bool link_health(int32_t **cur, int32_t **max)
     return false;
   uintptr_t cur_param = sys_ptr(params + PARAMS_HEALTH_CUR);
   uintptr_t max_param = sys_ptr(params + PARAMS_HEALTH_MAX);
-  if (!cur_param || !max_param || sys_ptr(cur_param) != MAIN(Z64HD_VT_PARAM) ||
-      sys_ptr(max_param) != MAIN(Z64HD_VT_PARAM))
+  if (!cur_param || !max_param || sys_ptr(cur_param) != MAIN(z64hd_game->vt_param) ||
+      sys_ptr(max_param) != MAIN(z64hd_game->vt_param))
     return false;
   *cur = (int32_t *)(cur_param + PARAM_VALUE);
   *max = (int32_t *)(max_param + PARAM_VALUE);
@@ -58,7 +57,7 @@ bool link_health(int32_t **cur, int32_t **max)
 
 bool link_drawn_pos(vec3f_t *out)
 {
-  uintptr_t disp = sys_ptr(MAIN(Z64HD_DISP_PTR));
+  uintptr_t disp = sys_ptr(MAIN(z64hd_game->disp_ptr));
   disp = disp ? sys_ptr(disp) : 0;
   if (!disp || !sys_mapped(disp + DISP_POSITION, 12, SYS_PERM_R))
     return false;
@@ -68,13 +67,13 @@ bool link_drawn_pos(vec3f_t *out)
 
 uintptr_t camera(void)
 {
-  uintptr_t manager = sys_ptr(MAIN(Z64HD_CAMERA_PTR));
+  uintptr_t manager = sys_ptr(MAIN(z64hd_game->camera_ptr));
   return manager ? sys_ptr(manager + CAMERA_MANAGER_CAMERA) : 0;
 }
 
 uint32_t frame_counter(void)
 {
-  return *(volatile uint32_t *)MAIN(Z64HD_FRAME_COUNTER);
+  return *(volatile uint32_t *)MAIN(z64hd_game->frame_counter);
 }
 
 /* --- heap search ------------------------------------------------------------------------- */
@@ -124,7 +123,7 @@ static uintptr_t cached_equip_component, cached_equip_owner;
 
 static bool is_link_component(uintptr_t component, uintptr_t link)
 {
-  return sys_ptr(component) == MAIN(Z64HD_VT_EQUIP) && sys_ptr(component + EQUIP_COMPONENT_LINK) == link;
+  return sys_ptr(component) == MAIN(z64hd_game->vt_equip) && sys_ptr(component + EQUIP_COMPONENT_LINK) == link;
 }
 
 static bool is_links_component_hit(uintptr_t addr, void *link)
@@ -155,19 +154,19 @@ uintptr_t link_equip_component(void)
         return cached_equip_component;
       }
     }
-  cached_equip_component = mem_find_u64(MAIN(Z64HD_VT_EQUIP), is_links_component_hit, (void *)link);
+  cached_equip_component = mem_find_u64(MAIN(z64hd_game->vt_equip), is_links_component_hit, (void *)link);
   return cached_equip_component;
 }
 
 static bool is_owner_hit(uintptr_t addr, void *component)
 {
   (void)component;
-  return sys_ptr(addr - EQUIP_OWNER_COMPONENT) == MAIN(Z64HD_VT_EQUIP_OWNER);
+  return sys_ptr(addr - EQUIP_OWNER_COMPONENT) == MAIN(z64hd_game->vt_equip_owner);
 }
 
 static bool is_equip_owner_of(uintptr_t owner, uintptr_t component)
 {
-  return sys_ptr(owner) == MAIN(Z64HD_VT_EQUIP_OWNER) && sys_ptr(owner + EQUIP_OWNER_COMPONENT) == component;
+  return sys_ptr(owner) == MAIN(z64hd_game->vt_equip_owner) && sys_ptr(owner + EQUIP_OWNER_COMPONENT) == component;
 }
 
 uintptr_t link_equip_owner(void)

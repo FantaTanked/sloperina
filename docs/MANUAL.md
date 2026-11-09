@@ -29,7 +29,7 @@ Everything sloperinaGZ can do, menu by menu. New to it? Start with the [usage gu
 
 ## 1 Introduction
 
-sloperinaGZ is a practice menu for **The Legend of Zelda: Ocarina of Time (Switch 2)**, update v131072, modelled
+sloperinaGZ is a practice menu for **The Legend of Zelda: Ocarina of Time (Switch 2)**, versions 1.0.0 and 1.1.1, modelled
 on gz, the practice ROM for the N64 game. The game loads it itself, so it runs on a console (Atmosphère) and in
 emulators alike. Open the menu with **R + right stick down**.
 
@@ -307,7 +307,7 @@ dropped (é shows as e) and other alphabets can't be shown yet.
 
 ## 7 Known limits
 
-- Only **update v131072** of the game is supported.
+- Game versions **1.0.0** (base) and **1.1.1** (update v131072) are supported.
 - Collision shows the air walls; the full collision mesh isn't drawn yet.
 - Memory watches aren't kept between runs.
 - Frame advance freezes the picture while paused ([4](#4-about-frame-advance)).

@@ -21,7 +21,7 @@ void pouch_gear(const char *item, bool remove);          /* ocarinas: give / tak
 extern const char *const ocarina_names[3];
 int  pouch_ocarina(void);     /* the choice shown: pending one while queued, else what Link holds */
 void pouch_set_ocarina(int choice);
-void pouch_unequip(int str_slot, const char *item);      /* take worn gear off Link */
+void pouch_unequip(uint32_t str_slot, const char *item); /* take worn gear off Link */
 void pouch_refresh_screen(uintptr_t vtable_off);
 void pouch_clear_buttons(const char *choice);            /* take an item off the item buttons */
 void pouch_clear_buttons_cancel(const char *choice);     /* stop doing so (item given back) */

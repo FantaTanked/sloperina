@@ -253,7 +253,7 @@ static void input_display_frame(bool menu_open)
 #define CAMERA_POS 0x38
 #define CAMERA_AT 0x44
 
-/* the display object (Z64HD_DISP_PTR, two pointers deep): Link's drawn position, 3 floats */
+/* the display object (two pointers deep): Link's drawn position, 3 floats */
 #define DISP_POSITION 0x29C
 
 static const float DEGREES_PER_RADIAN = 57.29577951f;
@@ -704,7 +704,7 @@ bool watch_entry_address(const watch_entry_t *entry, uintptr_t *addr, int *mw_ty
       type = entry->type;
       break;
     case W_X: case W_Y: case W_Z: /* the drawn position (link_drawn_pos) */
-      base = sys_ptr(MAIN(Z64HD_DISP_PTR));
+      base = sys_ptr(MAIN(z64hd_game->disp_ptr));
       base = base ? sys_ptr(base) : 0;
       found = base ? base + DISP_POSITION + (uintptr_t)(entry->id - W_X) * 4 : 0;
       break;
@@ -721,7 +721,7 @@ bool watch_entry_address(const watch_entry_t *entry, uintptr_t *addr, int *mw_ty
       found = base ? base + CAMERA_POS : 0;
       break;
     case W_FRAME:
-      found = MAIN(Z64HD_FRAME_COUNTER);
+      found = MAIN(z64hd_game->frame_counter);
       type = MW_U32;
       break;
     case W_MAP:

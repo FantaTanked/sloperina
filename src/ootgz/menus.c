@@ -521,7 +521,7 @@ static void set_owned(menu_item_t *it, bool on)
     if (item->button)
       pouch_clear_buttons_cancel(item->button);
   } else {
-    if (item->worn_slot >= 0)
+    if (item->worn_slot)
       pouch_unequip(item->worn_slot, item->worn_item);
     if (item->button)
       pouch_clear_buttons(item->button);
@@ -596,7 +596,7 @@ static void set_trade(menu_item_t *it, int choice)
   }
   uint32_t replacement = murmur3(chosen ? chosen->button : "Empty");
   if (replace_on_item_buttons(old_buttons, n_old, replacement))
-    pouch_refresh_screen(Z64HD_VT_HUD);
+    pouch_refresh_screen(z64hd_game->vt_hud);
 }
 
 /* Owned items that are one choice (hookshot / longshot, the big swords): it->data = the group,
@@ -630,7 +630,7 @@ static void set_owned_group(menu_item_t *it, int choice)
         pouch_clear_buttons_cancel(item->button);
       continue;
     }
-    if (had && item->worn_slot >= 0)
+    if (had && item->worn_slot)
       pouch_unequip(item->worn_slot, item->worn_item);
     if (had && item->button) {
       /* an item button holding the old one gets the new one (or nothing), as with trade items */
@@ -641,7 +641,7 @@ static void set_owned_group(menu_item_t *it, int choice)
     }
   }
   if (changed)
-    pouch_refresh_screen(Z64HD_VT_HUD);
+    pouch_refresh_screen(z64hd_game->vt_hud);
 }
 
 static const inv_item_t *hookshots[2];
@@ -1096,7 +1096,7 @@ static void build_dungeon_items(void)
   for (int d = 0; d < data_n_dungeons && d < MAX_DUNGEONS; d++) {
     menu_init(&m_dungeon[d], data_dungeons[d].label, 5);
     for (int k = 0; k < ARRAY_LEN(data_dungeons[d].items); k++)
-      add_flag(&m_dungeon[d], &data_dungeons[d].items[k], Z64HD_VT_MAP_SCREEN);
+      add_flag(&m_dungeon[d], &data_dungeons[d].items[k], z64hd_game->vt_map_screen);
     add_small_keys(&m_dungeon[d], data_dungeons[d].label);
     menu_add_return(&m_dungeon[d]);
     menu_add_submenu(&m_dungeon_items, data_dungeons[d].label, &m_dungeon[d]);
@@ -1152,7 +1152,7 @@ static const struct { const char *game, *shown; } worn_names[] = {
 
 /* the lines of the equips menu: what Link wears in each slot (it->data indexes both) */
 static const char *const worn_slot_names[] = { "sword", "shield", "tunic", "boots", "arrow", "ocarina" };
-static const int worn_slot_fields[] = { GD_STR_SWORD, GD_STR_SHIELD, GD_STR_TUNIC, GD_STR_BOOTS, GD_STR_ARROW,
+static const uint32_t worn_slot_fields[] = { GD_STR_SWORD, GD_STR_SHIELD, GD_STR_TUNIC, GD_STR_BOOTS, GD_STR_ARROW,
                                         GD_STR_OCARINA };
 
 /* Anything else: drop the Weapon_/Armor_/Item_ prefix and its category, split the words, lower case. */

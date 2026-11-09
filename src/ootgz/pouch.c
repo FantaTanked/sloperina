@@ -44,7 +44,7 @@ static void set_name(pouch_name_t *name, const char *item)
 
 static void *pouch_manager(void)
 {
-  uintptr_t holder = sys_ptr(MAIN(Z64HD_POUCH_MGR_PTR));
+  uintptr_t holder = sys_ptr(MAIN(z64hd_game->pouch_mgr_ptr));
   return (void *)(holder ? sys_ptr(holder) : 0);
 }
 
@@ -73,10 +73,10 @@ bool pouch_add_now(const char *item, bool equip_direct)
   set_name(&name, item);
   /* as the OneShotAddOrRemovePouchContent event node calls it (Saria gives the ocarina with
    * IsEquipDirect = false) */
-  bool ok = MAIN_FN(pouch_add_t, Z64HD_POUCH_ADD)(mgr, &name, 0, 1, 0, 0, 0, equip_direct, false) & 1;
-  uintptr_t target = sys_ptr(MAIN(Z64HD_POUCH_NOTIFY_PTR));
+  bool ok = MAIN_FN(pouch_add_t, z64hd_game->pouch_add)(mgr, &name, 0, 1, 0, 0, 0, equip_direct, false) & 1;
+  uintptr_t target = sys_ptr(MAIN(z64hd_game->pouch_notify_ptr));
   if (target)
-    MAIN_FN(pouch_notify_t, Z64HD_POUCH_NOTIFY)((void *)target, &name, ok, 0);
+    MAIN_FN(pouch_notify_t, z64hd_game->pouch_notify)((void *)target, &name, ok, 0);
   log_printf("add %s: %s", item, ok ? "ok" : "refused");
   return ok;
 }
@@ -89,7 +89,7 @@ bool pouch_remove_now(const char *item)
   pouch_name_t name;
   set_name(&name, item);
   /* what the event node does for Num < 0 (AddPouch with a negative count does nothing) */
-  MAIN_FN(pouch_remove_t, Z64HD_POUCH_REMOVE)(mgr, &name, 1, 0, 0, 0);
+  MAIN_FN(pouch_remove_t, z64hd_game->pouch_remove)(mgr, &name, 1, 0, 0, 0);
   log_printf("remove %s", item);
   return true;
 }
@@ -102,7 +102,7 @@ bool pouch_remove_now(const char *item)
 
 static uintptr_t ui_manager(void)
 {
-  uintptr_t holder = sys_ptr(MAIN(Z64HD_UI_MGR_PTR));
+  uintptr_t holder = sys_ptr(MAIN(z64hd_game->ui_mgr_ptr));
   return holder ? sys_ptr(holder) : 0;
 }
 
@@ -129,7 +129,7 @@ static bool pick_hud(uintptr_t screen, uintptr_t unused)
 {
   (void)unused;
   uintptr_t widget = sys_ptr(screen + HUD_DPAD_WIDGET);
-  return widget && sys_ptr(widget) == MAIN(Z64HD_VT_DPAD);
+  return widget && sys_ptr(widget) == MAIN(z64hd_game->vt_dpad);
 }
 
 static bool call_refresh(uintptr_t screen)
@@ -205,14 +205,14 @@ static bool job_gear(job_t *job)
           log_printf("%s: owner of Link's equipment not found", item);
           return true;
         }
-        MAIN_FN(equip_all_t, Z64HD_EQUIP_ALL_FN)(owner, 0);
+        MAIN_FN(equip_all_t, z64hd_game->equip_all_fn)(owner, 0);
       } else {
         uintptr_t component = link_equip_component();
         if (!component) {
           log_printf("%s: Link's equipment component not found", item);
           return true;
         }
-        MAIN_FN(equip_slot_t, Z64HD_EQUIP_SLOT_FN)(component, EQUIP_SLOT_OCARINA);
+        MAIN_FN(equip_slot_t, z64hd_game->equip_slot_fn)(component, EQUIP_SLOT_OCARINA);
       }
       return false;
     default:
@@ -276,7 +276,7 @@ void pouch_set_ocarina(int choice)
 /* Steps: 0 empty the slot and re-apply Link's gear, 1 redraw the HUD. */
 static bool job_unequip(job_t *job)
 {
-  int slot = (int)job->arg[0];
+  uint32_t slot = (uint32_t)job->arg[0];
   const char *item = (const char *)job->arg[1];
   if (job->step == 0) {
     const char *worn = gd_get_str(slot);
@@ -286,14 +286,14 @@ static bool job_unequip(job_t *job)
     uintptr_t owner = link_equip_owner();
     if (!owner)
       return true;
-    MAIN_FN(equip_all_t, Z64HD_EQUIP_ALL_FN)(owner, 0);
+    MAIN_FN(equip_all_t, z64hd_game->equip_all_fn)(owner, 0);
     return false;
   }
   hud_refresh_now();
   return true;
 }
 
-void pouch_unequip(int str_slot, const char *item)
+void pouch_unequip(uint32_t str_slot, const char *item)
 {
   job_submit(JOB_KEY(JOB_UNEQUIP, murmur3(item)), job_unequip, str_slot, (intptr_t)item, 0, 0);
 }
@@ -371,7 +371,7 @@ void pouch_frame(void)
     }
   }
   if (changed)
-    pouch_refresh_screen(Z64HD_VT_HUD);
+    pouch_refresh_screen(z64hd_game->vt_hud);
 }
 
 /* --- upgrades ------------------------------------------------------------------------------ */

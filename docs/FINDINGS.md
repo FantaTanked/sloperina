@@ -487,7 +487,7 @@ Objects:
   `event`, `starter`), `…NextPosition`, `…DungeonRoomID`, `Sequence_BancChangeFadePattern`, and
   `Sequence_ControlInEvent = ChangeBancOnEvent`, which the Event sequence (`romfs/Sequence/Event.module`)
   turns into `ChangeBancOnEvent` › `ChangeBanc`. The native menu requests the same event the way the
-  `SeqOneShotRequestEvent` node does (`main+0x32db1a0`; layout in `z64hd_v131072.h`). Verified: instant
+  `SeqOneShotRequestEvent` node does (`main+0x32db1a0` in 1.1.1, layout in `z64hd.h`). Verified: instant
   warps to Kakariko and Hyrule Field.
 - **Symptom:** warping to `SacredForestMeadow_Child / ForestMinuet` crashed after the game reserved the map.
 - **Cause:** `Dm_SY_BancChangeGo` always reserves the spawn name as the *event starter*, and the standard
@@ -513,6 +513,29 @@ Objects:
 - **Now:** levitate scans the heap like game.py (16 MiB per frame, regions nearest the actor first) for a match
   within 0.3 that is followed by float motion state, not doubles, and test-lifts each (at most 6). Not yet
   confirmed in game.
+
+### 5.20 Base game support (1.0.0, package v65536)
+
+- **Symptom:** The 1.1.1 IPS never matches the base build. Reusing the update's offsets would
+  call or write unrelated locations.
+- **Fix:** Ship one subsdk9 and two IPS32 patches. The loader chooses by main build ID. The
+  module matches nnMain and MOD0, then checks the patch format, game revision, branch, and
+  writable slot before installing the hook. Both stubs fall through to the game's original
+  UnlockMutex when the slot is zero.
+- **How:** Matched instruction sequences and callers across both executables, resolved the
+  unlock import by name, followed code references to globals, and compared relocated vtable
+  methods. The base hook is at main+0x3af2a6c, with executable padding at +0x3be6a00 and a
+  slot at +0x4e2a070 after MOD0's bss end. The base item's event calls AddPouch and returns
+  without the update's separate notification, so the base profile omits that call.
+- **String64:** The base game's data puts Sequence_CurrentBanc at index 0x1d. The update puts
+  it at 0x1f. This broke both the old anchor test and the warp fields at fixed indices.
+  Both GetString64 implementations use the type at manager+0x608 and the value pointer at
+  object+0x68 (stride 0x108). The module resolves strings by hash and checks the value's
+  capacity and mapping. A failed warp fallback now ends the pending request.
+- **Verified:** The port built on v0.0.1 ran on both revisions in Lichii. The loader selected the
+  correct IPS, and the shared module initialized the frame, input, and drawing hooks. The menu
+  opened on 1.0.0. A host-side read/write test used the different String64 indices from each build.
+  Full in-game warping after the String64 fix still needs a play test.
 
 ## 6. Things that do not work
 
