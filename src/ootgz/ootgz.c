@@ -53,12 +53,13 @@ static uint32_t frames;
  * tap lets one frame through, and the button + L3 lets it run again; the menu still opens (R + right
  * stick down) and works as usual. gz's pause icon shows at the top left. The game never sees the
  * button while it's on.
- * A tap is the button let go with nothing else pressed while it was held, so R's shortcuts (R +
- * right stick down, R + d-left...) don't pause the game. */
+ * As in gz, everything else can be held or pressed meanwhile (the stick, A, Z...): the frame let
+ * through reads the controller as it is, plus what was buffered while paused. Only R's shortcuts
+ * (R + right stick down, R + d-pad...) don't count as a tap, so they don't pause the game; L has none. */
 bool frame_advance = true, pause_display = true;
 int frame_advance_button; /* 0 L, 1 R */
 static bool fa_paused, fa_down, fa_dirty;
-/* held (with nothing else pressed) for FA_HOLD_MS, the button advances a frame every FA_REPEAT_MS until
+/* held (not as a shortcut) for FA_HOLD_MS, the button advances a frame every FA_REPEAT_MS until
  * it's let go: the wait leaves room for a tap that's a little long */
 #define FA_HOLD_MS 400
 #define FA_REPEAT_MS 66
@@ -72,6 +73,11 @@ static bool fa_menu_was_open, fa_blocked;
 static uint64_t fa_menu_closed_at;
 
 static uint32_t fa_bit(void) { return frame_advance_button ? BTN_R : BTN_L; }
+/* what, held or pressed with the button, makes it a shortcut rather than a tap */
+static uint32_t fa_shortcut_keys(void)
+{
+  return frame_advance_button ? (BTN_DUP | BTN_DDOWN | BTN_DLEFT | BTN_DRIGHT | BTN_RS_DOWN) : 0;
+}
 
 /* the button's state this frame: 1 tapped, 2 + L3 (run), 3 held (another frame), 0 nothing */
 static int fa_button(void)
@@ -88,14 +94,14 @@ static int fa_button(void)
     fa_blocked = false;
   }
   if (pressed & b)
-    fa_down = true, fa_dirty = (held & ~b) != 0, fa_down_at = sys_tick(), fa_repeating = false;
+    fa_down = true, fa_dirty = (held & fa_shortcut_keys()) != 0, fa_down_at = sys_tick(), fa_repeating = false;
   if (!fa_down)
     return 0;
   if ((held & b) && (held & BTN_LSTICK) && ((pressed & b) || (pressed & BTN_LSTICK))) {
     fa_dirty = true;
     return 2;
   }
-  if (pressed & ~b)
+  if (pressed & fa_shortcut_keys())
     fa_dirty = true;
   if (!(held & b)) {
     bool tap = !fa_dirty && !fa_repeating; /* a hold already advanced: no extra frame */

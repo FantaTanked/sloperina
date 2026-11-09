@@ -289,7 +289,9 @@ With **settings > frame advance > enabled** on and the menu closed:
   you can see it hasn't crashed). Tap again: one frame. **Hold** it: after a moment, frames play
   one after another (about 15 a second) until you let go.
 - **Button + L3**: the game runs again.
-- A tap counts when you let go, and only if you pressed nothing else meanwhile, so R's shortcuts still work.
+- A tap counts when you let go. You can hold or press anything else meanwhile (move the stick, hold A or Z...),
+  as in gz: the frame you let through gets it. Only with **R** as the button, R + D-pad and R + right stick down
+  stay shortcuts and don't advance.
 - **Buffered input**: everything you press while paused, and the last direction you push each stick, is given to
   the next frame, even if you've let go by then.
 - While paused the picture doesn't change (the game draws nothing), so the watches and input display update with
