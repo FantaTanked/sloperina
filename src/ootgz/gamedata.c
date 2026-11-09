@@ -41,31 +41,25 @@ typedef void (*gd_setint_t)(void *mgr, int32_t value, uint32_t hash);
 
 /* Where each type's values live in its field objects. */
 static const struct {
-  uintptr_t vtable_off; /* type entry vtable (main+), 0 = fixed offset */
   uint32_t  stride;     /* object size */
   uint32_t  value_off;  /* value offset in the object; a copy follows it */
 } type_layouts[GD_NTYPES] = {
-  [GD_INT]   = { 0,                   0x28, 0x1C },
-  [GD_BOOL]  = { Z64HD_VT_BOOL_TYPE,  0x18, 0x16 },
-  [GD_FLOAT] = { Z64HD_VT_FLOAT_TYPE, 0x28, 0x1C },
-  [GD_ENUM]  = { Z64HD_VT_ENUM_TYPE,  0x38, 0x1C },
+  [GD_INT]   = { 0x28, 0x1C },
+  [GD_BOOL]  = { 0x18, 0x16 },
+  [GD_FLOAT] = { 0x28, 0x1C },
+  [GD_ENUM]  = { 0x38, 0x1C },
 };
 
 /* sanity limits for a type entry read from memory */
 #define MAX_FIELD_COUNT     0x10000
 #define MAX_HASH_TABLE_SIZE 0x100000
 
-#define MAIN_IMAGE_SIZE_MAX 0x6000000 /* main's image is smaller than this: vtables lie inside it */
-#define MIN_MAP_NAME_LEN    4         /* a real map name is at least this long */
 
 static uint32_t type_entry_off[GD_NTYPES]; /* offset of each type entry in the manager; 0 = not found */
-static uintptr_t str_base;                 /* address of String64 index 0's text */
-static void *str_mgr;                      /* manager str_base was found for */
-static gd_type_t *str_type;                /* the String64 type entry */
 
 void *gd_manager(void)
 {
-  uintptr_t holder = sys_ptr(MAIN(Z64HD_GD_MGR_PTR));
+  uintptr_t holder = sys_ptr(MAIN(z64hd_game->gd_mgr_ptr));
   return (void *)(holder ? sys_ptr(holder) : 0);
 }
 
@@ -73,8 +67,6 @@ void gd_reset(void)
 {
   for (int i = 0; i < GD_NTYPES; i++)
     type_entry_off[i] = 0;
-  str_base = 0;
-  str_mgr = 0;
 }
 
 static bool type_plausible(const gd_type_t *type)
@@ -98,7 +90,12 @@ static gd_type_t *find_type_entry(gd_kind_t kind)
   if (kind == GD_INT)
     return type_plausible((gd_type_t *)(mgr + Z64HD_GD_INT_TYPE)) ?
            (gd_type_t *)(mgr + Z64HD_GD_INT_TYPE) : 0;
-  uintptr_t vtable = MAIN(type_layouts[kind].vtable_off);
+  const uint32_t vtable_offsets[GD_NTYPES] = {
+    [GD_BOOL] = z64hd_game->vt_bool_type,
+    [GD_FLOAT] = z64hd_game->vt_float_type,
+    [GD_ENUM] = z64hd_game->vt_enum_type,
+  };
+  uintptr_t vtable = MAIN(vtable_offsets[kind]);
   if (type_entry_off[kind]) {
     gd_type_t *type = (gd_type_t *)(mgr + type_entry_off[kind]);
     if (type->vtable == vtable && type_plausible(type))
@@ -150,7 +147,7 @@ static uint8_t *gd_value(gd_kind_t kind, uint32_t hash)
 bool gd_ready(void)
 {
   gd_type_t *type = find_type_entry(GD_INT);
-  return type && sys_ptr((uintptr_t)type->objects) == MAIN(Z64HD_VT_INT_FIELD);
+  return type && sys_ptr((uintptr_t)type->objects) == MAIN(z64hd_game->vt_int_field);
 }
 
 /* --- Int ------------------------------------------------------------------------------- */
@@ -161,14 +158,14 @@ bool gd_get_int(uint32_t hash, int32_t *out)
   if (!mgr || !gd_ready())
     return false;
   *out = 0;
-  return MAIN_FN(gd_getint_t, Z64HD_GD_GETINT)(mgr, out, hash);
+  return MAIN_FN(gd_getint_t, z64hd_game->gd_getint)(mgr, out, hash);
 }
 
 void gd_set_int(uint32_t hash, int32_t value)
 {
   void *mgr = gd_manager();
   if (mgr && gd_ready())
-    MAIN_FN(gd_setint_t, Z64HD_GD_SETINT)(mgr, value, hash);
+    MAIN_FN(gd_setint_t, z64hd_game->gd_setint)(mgr, value, hash);
 }
 
 bool gd_poke_int(uint32_t hash, int32_t value)
@@ -232,76 +229,47 @@ bool gd_set_enum(uint32_t hash, uint32_t value)
 
 /* --- String64 ---------------------------------------------------------------------------- */
 
-/* Looks like a map name: letters, digits and '_', at least MIN_MAP_NAME_LEN long and terminated. */
-static bool plausible_name(const char *s)
-{
-  int len = 0;
-  for (; len < GD_STR_LEN && s[len]; len++) {
-    char c = s[len];
-    if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_'))
-      return false;
-  }
-  return len >= MIN_MAP_NAME_LEN && len < GD_STR_LEN;
-}
-
-/* game.py finds the pair (Sequence_CurrentBanc, 0x1F) in the String64 hash table and
- * takes index 0's text at pair + 0x207C - 0x1F * 0x108. Same here, but the table is found
- * among the manager's type entries instead of by scanning the heap. */
-static bool find_strings(void)
+/* Follow the same hash table and value pointer as the game's GetString64. */
+static char *string_value(uint32_t hash)
 {
   uint8_t *mgr = gd_manager();
   if (!mgr)
-    return false;
-  if (str_base && str_mgr == mgr && plausible_name((char *)str_base + GD_STR_MAP * Z64HD_STR_STRIDE))
-    return true;
-  str_base = 0;
-  if (!sys_mapped((uintptr_t)mgr, Z64HD_GD_TYPES_SCAN + sizeof(gd_type_t), SYS_PERM_R))
-    return false;
-  for (uint32_t offset = 0; offset < Z64HD_GD_TYPES_SCAN; offset += 8) {
-    gd_type_t *type = (gd_type_t *)(mgr + offset);
-    if (type->vtable < z64hd_main || type->vtable >= z64hd_main + MAIN_IMAGE_SIZE_MAX || !type_plausible(type))
-      continue;
-    uint32_t *pair = gd_lookup(type, Z64HD_STR_ANCHOR_HASH);
-    if (!pair || pair[1] != Z64HD_STR_ANCHOR_IDX)
-      continue;
-    uintptr_t base = (uintptr_t)pair + Z64HD_STR_FIRST_VALUE - Z64HD_STR_ANCHOR_IDX * Z64HD_STR_STRIDE;
-    uintptr_t map_name = base + GD_STR_MAP * Z64HD_STR_STRIDE;
-    if (sys_mapped(map_name, GD_STR_LEN, SYS_PERM_R | SYS_PERM_W) && plausible_name((char *)map_name)) {
-      str_base = base;
-      str_mgr = mgr;
-      str_type = type;
-      return true;
-    }
-  }
-  return false;
-}
-
-const char *gd_get_str(int idx)
-{
-  if (!find_strings())
     return 0;
-  return (const char *)(str_base + (uintptr_t)idx * Z64HD_STR_STRIDE);
+  const gd_type_t *t = (const gd_type_t *)(mgr + Z64HD_GD_STRING_TYPE);
+  if (!type_plausible(t))
+    return 0;
+  uint32_t index = 0;
+  if (hash) {
+    const uint32_t *e = gd_lookup(t, hash);
+    if (!e || e[1] >= t->count)
+      return 0;
+    index = e[1];
+  }
+  uintptr_t field = (uintptr_t)t->objects + (size_t)index * Z64HD_STR_STRIDE + Z64HD_STR_VALUE;
+  uintptr_t text = sys_ptr(field);
+  uint32_t capacity;
+  if (!text || !sys_read32(field + sizeof(uintptr_t), &capacity) || capacity < GD_STR_LEN ||
+      !sys_mapped(text, GD_STR_LEN, SYS_PERM_R | SYS_PERM_W))
+    return 0;
+  return (char *)text;
 }
 
-bool gd_set_str(int idx, const char *s)
+const char *gd_get_str(uint32_t hash)
 {
-  if (!find_strings())
+  return string_value(hash);
+}
+
+bool gd_set_str(uint32_t hash, const char *s)
+{
+  char *d = hash ? string_value(hash) : 0;
+  if (!d)
     return false;
-  char *dest = (char *)(str_base + (uintptr_t)idx * Z64HD_STR_STRIDE);
   int i = 0;
   for (; i < GD_STR_LEN - 1 && s[i]; i++)
-    dest[i] = s[i];
-  for (; i < GD_STR_LEN; i++) /* zero the rest of the field */
-    dest[i] = 0;
+    d[i] = s[i];
+  for (; i < GD_STR_LEN; i++)
+    d[i] = 0;
   return true;
-}
-
-int gd_str_index(uint32_t hash)
-{
-  if (!find_strings() || !str_type)
-    return -1;
-  uint32_t *pair = gd_lookup(str_type, hash);
-  return pair && pair[1] < str_type->count ? (int)pair[1] : -1;
 }
 
 /* --- the game's pause ---------------------------------------------------------------------------- */

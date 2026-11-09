@@ -9,7 +9,7 @@
     -Uninstall         remove sloperinaGZ instead (your settings stay)
     -Yes               don't ask before replacing files
 
-  It copies two files (the module, subsdk9, and the patch that loads it, <build id>.ips) and the translation
+  It copies the module (subsdk9), the game-version patches and the translation
   template, into the layout each emulator or Atmosphère reads. Nothing else on your system is changed.
 #>
 param(
@@ -22,11 +22,11 @@ $ErrorActionPreference = 'Stop'
 
 $TitleId = '0400486024DEC000'
 $Name = 'sloperinaGZ'
-$BuildId = 'E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348'
+$BuildIds = @('33FA6C2C23848282A77E8B88A0A93F4887C55920', 'E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348')
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Files = Join-Path $Here 'files'
 $Module = Join-Path $Files 'subsdk9'
-$Patch = Join-Path $Files "$BuildId.ips"
+$Patches = @($BuildIds | ForEach-Object { Join-Path $Files "$_.ips" })
 $Template = Join-Path $Files 'lang\template.json'
 
 # emulators, with where they keep their data on Windows; kind: how they lay out mods
@@ -48,10 +48,10 @@ function Confirm-Replace($file) {
   return ($answer -eq '' -or $answer -match '^[yY]')
 }
 
-function Copy-One($from, $toDir, $toName) {
+function Copy-One($from, $toDir, $toName, $confirmed = $false) {
   New-Item -ItemType Directory -Force -Path $toDir | Out-Null
   $to = Join-Path $toDir $toName
-  if (Confirm-Replace $to) {
+  if ($confirmed -or (Confirm-Replace $to)) {
     Copy-Item -Force $from $to
     Say "  copied  $to" 'Green'
   } else {
@@ -92,14 +92,17 @@ function Get-Layout($kind, $dir) {
 
 function Install-To($kind, $dir, $label) {
   $layout = Get-Layout $kind $dir
+  $patchDir = if ($layout.PatchDir) { $layout.PatchDir } else { $layout.Exefs }
   Say "`nInstalling sloperinaGZ for $label in $dir" 'Cyan'
-  foreach ($o in $layout.Old) { Remove-IfThere $o '  (an older ootgz install: two copies would clash)' }
-  Copy-One $Module $layout.Exefs 'subsdk9'
-  if ($layout.PatchDir) {
-    Copy-One $Patch $layout.PatchDir "$BuildId.ips"
-  } else {
-    Copy-One $Patch $layout.Exefs "$BuildId.ips"
+  if (-not (Confirm-Replace (Join-Path $layout.Exefs 'subsdk9'))) { return }
+  foreach ($patch in $Patches) {
+    if (-not (Confirm-Replace (Join-Path $patchDir (Split-Path -Leaf $patch)))) { return }
   }
+  foreach ($o in $layout.Old) { Remove-IfThere $o '  (an older ootgz install: two copies would clash)' }
+  foreach ($patch in $Patches) {
+    Copy-One $patch $patchDir (Split-Path -Leaf $patch) $true
+  }
+  Copy-One $Module $layout.Exefs 'subsdk9' $true
   if (Test-Path $Template) { Copy-One $Template $layout.Lang 'template.json' }
   Say "`nDone. Start the game and press R + right stick down for the menu." 'Green'
   if ($kind -eq 'switch') {
@@ -114,12 +117,12 @@ function Uninstall-From($kind, $dir, $label) {
   Say "Done. Your settings (in the SD card's $Name folder) were kept; delete that folder to remove them too." 'Green'
 }
 
-foreach ($f in @($Module, $Patch)) {
+foreach ($f in @($Module) + $Patches) {
   if (-not (Test-Path $f)) { Say "Missing $f. Run this from the unzipped release folder." 'Red'; exit 1 }
 }
 
 Say 'sloperinaGZ installer' 'Cyan'
-Say 'For The Legend of Zelda: Ocarina of Time (Switch 2), update v131072.'
+Say 'For The Legend of Zelda: Ocarina of Time (Switch 2), versions 1.0.0 and 1.1.1.'
 
 # choose the target
 $kind = ''; $dir = ''; $label = ''

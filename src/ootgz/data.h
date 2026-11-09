@@ -16,7 +16,7 @@ typedef struct {
   field_t     owned;     /* IK_OWNED: Int 0/1 */
   uint32_t    acquired;  /* Bool "has been acquired" (what the item screen needs) */
   const char *button;    /* item-button choice name, or NULL */
-  int8_t      worn_slot; /* GD_STR_* it's worn in, or -1 */
+  uint32_t    worn_slot; /* GD_STR_* it's worn in, or 0 */
   const char *worn_item; /* PlayerStatus.Equip* value when worn */
 } inv_item_t;
 

@@ -1,6 +1,6 @@
 # sloperinaGZ (source: src/ootgz): the native (in-game) build. See docs/BUILDING.md.
 #
-#   make            build bin/<version>/subsdk9 and bin/<version>/<build id>.ips
+#   make            build bin/subsdk9 and one bin/<build id>.ips per supported game
 #   make dist       stage install trees in dist/ (atmosphere/, lichii/, exefs/)
 #   make clean
 #
@@ -15,10 +15,8 @@ CC                    = $(TOOLS)gcc
 ELF2NSO               = $(DEVKITPRO)/tools/bin/elf2nso
 HOSTCC               ?= gcc
 
-VERSIONS              = v131072
 PROGRAM_ID            = 0400486024DEC000
-BUILD_ID-v131072      = E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348
-VERSION_DEFINE-v131072 = Z64HD_V131072
+BUILD_IDS             = 33FA6C2C23848282A77E8B88A0A93F4887C55920 E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348
 SUBSDK                = subsdk9
 NAME                  = sloperinaGZ
 
@@ -49,7 +47,9 @@ CSRC                  = $(wildcard $(SRCDIR)/*.c)
 SSRC                  = $(wildcard $(SRCDIR)/*.S)
 HDRS                  = $(wildcard $(SRCDIR)/*.h)
 
-all: $(foreach v,$(VERSIONS),$(BINDIR)/$(v)/$(SUBSDK) $(BINDIR)/$(v)/$(BUILD_ID-$(v)).ips)
+PATCHES               = $(addprefix $(BINDIR)/,$(addsuffix .ips,$(BUILD_IDS)))
+
+all: $(BINDIR)/$(SUBSDK) $(PATCHES)
 
 # The about menu's build info: the version and the day it was built ("9th November, 2026"). Made every
 # time; menus.c is rebuilt when it changes.
@@ -62,48 +62,41 @@ $(OBJDIR)/build_info.h: VERSION FORCE
 	cmp -s $@.tmp $@ || mv $@.tmp $@; rm -f $@.tmp
 FORCE:
 
-define version_rules
-$(OBJDIR)/$(1)/%.o: $(SRCDIR)/%.c $(HDRS) | $(OBJDIR)/$(1)
-	$(CC) $(CFLAGS) -I$(OBJDIR) -DZ64HD_VERSION=$(VERSION_DEFINE-$(1)) -c $$< -o $$@
-$(OBJDIR)/$(1)/menus.o: $(OBJDIR)/build_info.h
-$(OBJDIR)/$(1)/%.o: $(SRCDIR)/%.S | $(OBJDIR)/$(1)
-	$(CC) $(ASFLAGS) -c $$< -o $$@
-$(BINDIR)/$(1)/ootgz.elf: $(patsubst $(SRCDIR)/%,$(OBJDIR)/$(1)/%.o,$(basename $(SSRC) $(CSRC))) $(LDSCRIPT) | $(BINDIR)/$(1)
-	$(CC) $(ARCHFLAGS) $(LDFLAGS) -o $$@ $$(filter %.o,$$^) $(LDLIBS)
-	@# a function we call but don't define links fine and only fails when the game loads the module:
-	@# anything imported must be in lib/imports.txt (what main and sdk are known to export)
-	@missing=$$$$($(TOOLS)readelf --dyn-syms -W $$@ | awk '$$$$7=="UND" && $$$$8!="" {print $$$$8}' | LC_ALL=C sort -u | LC_ALL=C comm -23 - lib/imports.txt); \
-	if [ -n "$$$$missing" ]; then echo "error: not defined, and not a known import (lib/imports.txt):"; echo "$$$$missing"; rm -f $$@; exit 1; fi
-$(BINDIR)/$(1)/$(SUBSDK): $(BINDIR)/$(1)/ootgz.elf
-	$(ELF2NSO) $$< $$@
-$(BINDIR)/$(1)/$(BUILD_ID-$(1)).ips: $(OBJDIR)/host/mkips | $(BINDIR)/$(1)
-	$(OBJDIR)/host/mkips $$@
-$(OBJDIR)/$(1) $(BINDIR)/$(1):
-	mkdir -p $$@
-endef
-$(foreach v,$(VERSIONS),$(eval $(call version_rules,$(v))))
+$(OBJDIR)/%.o: $(SRCDIR)/%.c $(HDRS) | $(OBJDIR)
+	$(CC) $(CFLAGS) -I$(OBJDIR) -c $< -o $@
+$(OBJDIR)/menus.o: $(OBJDIR)/build_info.h
+$(OBJDIR)/%.o: $(SRCDIR)/%.S | $(OBJDIR)
+	$(CC) $(ASFLAGS) -c $< -o $@
+$(BINDIR)/ootgz.elf: $(patsubst $(SRCDIR)/%,$(OBJDIR)/%.o,$(basename $(SSRC) $(CSRC))) $(LDSCRIPT) | $(BINDIR)
+	$(CC) $(ARCHFLAGS) $(LDFLAGS) -o $@ $(filter %.o,$^) $(LDLIBS)
+	@# Reject undefined symbols the game's loader cannot resolve.
+	@missing=$$($(TOOLS)readelf --dyn-syms -W $@ | awk '$$7=="UND" && $$8!="" {print $$8}' | LC_ALL=C sort -u | LC_ALL=C comm -23 - lib/imports.txt); \
+	if [ -n "$$missing" ]; then echo "error: not defined, and not a known import (lib/imports.txt):"; echo "$$missing"; rm -f $@; exit 1; fi
+$(BINDIR)/$(SUBSDK): $(BINDIR)/ootgz.elf
+	$(ELF2NSO) $< $@
+$(PATCHES): $(OBJDIR)/host/mkips | $(BINDIR)
+	$(OBJDIR)/host/mkips $@
+$(OBJDIR) $(BINDIR):
+	mkdir -p $@
 
-$(OBJDIR)/host/mkips: $(HOSTDIR)/mkips.c $(SRCDIR)/z64hd_v131072.h $(SRCDIR)/ootgz_version.h
+$(OBJDIR)/host/mkips: $(HOSTDIR)/mkips.c $(SRCDIR)/z64hd.h $(SRCDIR)/z64hd_builds.h $(SRCDIR)/ootgz_version.h
 	mkdir -p $(@D)
 	$(HOSTCC) -std=c11 -O2 -Wall -o $@ $<
 
 # Install trees. Atmosphère convention (also what a Switch 2 CFW with LayeredFS would need):
 #   atmosphere/contents/<program id>/exefs/subsdk9
 #   atmosphere/exefs_patches/$(NAME)/<build id>.ips
-# Lichii / Eden: load/<program id>/ootgz/exefs/{subsdk9,<build id>.ips}
-# exefs/: the two files for an offline patcher (add subsdk9 to exefs, apply the .ips to main).
+# Lichii / Eden: load/<program id>/sloperinaGZ/exefs/{subsdk9,<build id>.ips}
+# exefs/: add subsdk9 to exefs and apply the matching .ips to main.
 dist: all
 	rm -rf $(DISTDIR)
-	$(foreach v,$(VERSIONS), \
-	  mkdir -p $(DISTDIR)/atmosphere/contents/$(PROGRAM_ID)/exefs \
-	           $(DISTDIR)/atmosphere/exefs_patches/$(NAME) \
-	           $(DISTDIR)/lichii/load/$(PROGRAM_ID)/$(NAME)/exefs \
-	           $(DISTDIR)/exefs/$(v) && \
-	  cp $(BINDIR)/$(v)/$(SUBSDK) $(DISTDIR)/atmosphere/contents/$(PROGRAM_ID)/exefs/ && \
-	  cp $(BINDIR)/$(v)/$(BUILD_ID-$(v)).ips $(DISTDIR)/atmosphere/exefs_patches/$(NAME)/ && \
-	  cp $(BINDIR)/$(v)/$(SUBSDK) $(BINDIR)/$(v)/$(BUILD_ID-$(v)).ips \
-	     $(DISTDIR)/lichii/load/$(PROGRAM_ID)/$(NAME)/exefs/ && \
-	  cp $(BINDIR)/$(v)/$(SUBSDK) $(BINDIR)/$(v)/$(BUILD_ID-$(v)).ips $(DISTDIR)/exefs/$(v)/ ;)
+	mkdir -p $(DISTDIR)/atmosphere/contents/$(PROGRAM_ID)/exefs \
+	         $(DISTDIR)/atmosphere/exefs_patches/$(NAME) \
+	         $(DISTDIR)/lichii/load/$(PROGRAM_ID)/$(NAME)/exefs $(DISTDIR)/exefs
+	cp $(BINDIR)/$(SUBSDK) $(DISTDIR)/atmosphere/contents/$(PROGRAM_ID)/exefs/
+	cp $(PATCHES) $(DISTDIR)/atmosphere/exefs_patches/$(NAME)/
+	cp $(BINDIR)/$(SUBSDK) $(PATCHES) $(DISTDIR)/lichii/load/$(PROGRAM_ID)/$(NAME)/exefs/
+	cp $(BINDIR)/$(SUBSDK) $(PATCHES) $(DISTDIR)/exefs/
 	# the SD card: the translation template (tools/lang_template.py), sd:/sloperinaGZ/lang/
 	mkdir -p $(DISTDIR)/sd/$(NAME)/lang && cp lang/template.json $(DISTDIR)/sd/$(NAME)/lang/
 

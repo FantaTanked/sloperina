@@ -1,12 +1,12 @@
 # Installing sloperinaGZ
 
-sloperinaGZ is two small files that the game loads itself: **`subsdk9`** (the menu) and
-**`E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips`** (a patch that loads it). You need both.
+Install **`subsdk9`** (the menu) and both **`.ips`** files. The loader selects the IPS for the
+running game build automatically.
 
 ## Before you start
 
-- **The game:** The Legend of Zelda: Ocarina of Time (Switch 2), **update v131072**. On any other update
-  sloperinaGZ simply doesn't load (the game runs normally).
+- **The game:** The Legend of Zelda: Ocarina of Time (Switch 2), **1.0.0** (base) or **1.1.1** (update v131072). Other
+  versions do not load the practice menu.
 - **Where it runs:** an emulator from the yuzu family (Eden, Lichii, yuzu, suyu, sudachi, citron, torzu),
   Ryujinx, or a console running Atmosphère.
 - **Download** the latest release zip and unzip it anywhere.
@@ -44,7 +44,7 @@ Same questions, same result. (If it says *permission denied*: `sh install.sh`.)
 
 ## Installing by hand
 
-The zip's `files` folder has everything. Copy the two files (and, if you like, the translation template) here:
+The zip's `files` folder has everything. Copy the module and both patches (and, if you like, the translation template) here:
 
 ### Eden, Lichii, yuzu, suyu, sudachi, citron, torzu
 
@@ -53,6 +53,7 @@ Open the emulator's folder (right-click the game > *Open mod data location*, or 
 
 ```
 load/0400486024DEC000/sloperinaGZ/exefs/subsdk9
+load/0400486024DEC000/sloperinaGZ/exefs/33FA6C2C23848282A77E8B88A0A93F4887C55920.ips
 load/0400486024DEC000/sloperinaGZ/exefs/E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips
 sdmc/sloperinaGZ/lang/template.json          (optional, for translators)
 ```
@@ -63,6 +64,7 @@ In Ryujinx's folder (`%APPDATA%\Ryujinx` on Windows, `~/.config/Ryujinx` on Linu
 
 ```
 mods/contents/0400486024dec000/sloperinaGZ/exefs/subsdk9
+mods/contents/0400486024dec000/sloperinaGZ/exefs/33FA6C2C23848282A77E8B88A0A93F4887C55920.ips
 mods/contents/0400486024dec000/sloperinaGZ/exefs/E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips
 ```
 
@@ -72,6 +74,7 @@ Copy the zip's `files/atmosphere` folder to the root of the SD card, so it has:
 
 ```
 atmosphere/contents/0400486024DEC000/exefs/subsdk9
+atmosphere/exefs_patches/sloperinaGZ/33FA6C2C23848282A77E8B88A0A93F4887C55920.ips
 atmosphere/exefs_patches/sloperinaGZ/E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348.ips
 ```
 
@@ -81,8 +84,8 @@ works but settings aren't kept.
 
 ### Patching the game files instead
 
-`files/exefs` has the two files for a tool that rebuilds the game's exefs: add `subsdk9` as a new exefs file and
-apply the IPS32 patch to `main` (offsets include the 0x100-byte NSO header, the usual convention).
+`files/exefs` has the files for a tool that rebuilds the game's exefs. Add `subsdk9` and apply
+only the IPS32 whose filename matches the build ID of `main` (offsets include the 0x100-byte NSO header, the usual convention).
 
 ## Updating
 
@@ -115,7 +118,7 @@ Language files are looked for when the game starts.
 
 ## It didn't work
 
-- **No sloperinaGZ splash at start-up.** Check the folder names and that both files are there. The game must be update
-  v131072. On an emulator, check the mod is ticked in the game's *Add-ons* / *Mods* list.
+- **No sloperinaGZ splash at start-up.** Check the folder names and that the module and both patches are there.
+  The game must be 1.0.0 or 1.1.1. On an emulator, check the mod is ticked in the game's *Add-ons* / *Mods* list.
 - **The game crashes at start-up.** Remove other mods that also add a `subsdk9` for this game; only one can.
 - More help: [the usage guide](docs/USAGE.md).

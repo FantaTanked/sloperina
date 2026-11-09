@@ -1,11 +1,11 @@
 # sloperinaGZ
 
 A gz-style practice menu for **The Legend of Zelda: Ocarina of Time (Switch 2)**, built the way gz is: C code
-the game loads and runs itself (an exefs module, `subsdk9`, plus a 67-byte IPS patch to main). It works from
+the game loads and runs itself (an exefs module, `subsdk9`, plus a build-specific IPS patch to main). It works from
 Atmosphère's LayeredFS, an emulator's mod folder (Lichii / Eden: `load/`) or an offline patcher.
 
-Supported version: program `0400486024DEC000`, update v131072 (main build `E0F3CCFA…`). Other versions have
-different addresses and won't work.
+Supported game versions are **1.0.0** (base) and **1.1.1** (update v131072), both under program
+`0400486024DEC000`. Install both IPS files to switch versions automatically.
 
 Source: [github.com/PracticeROM/sloperina](https://github.com/PracticeROM/sloperina). Website:
 [practicerom.com/oothd](https://practicerom.com/oothd).

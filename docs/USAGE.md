@@ -15,7 +15,7 @@ A quick guide to get you practising. For every option in every menu, see the [ma
 ## Getting started
 
 1. **Install it.** Follow [INSTALLATION.md](../INSTALLATION.md) (an emulator's mod folder, Atmosphère, or a patched copy).
-   sloperinaGZ works with **The Legend of Zelda: Ocarina of Time (Switch 2), update v131072** only.
+   sloperinaGZ works with **The Legend of Zelda: Ocarina of Time (Switch 2), versions 1.0.0 and 1.1.1**.
 2. **Start the game.** For a few seconds the bottom-right corner shows sloperinaGZ's name, version and
    build date, the website, and how to open the menu. That means it's running.
 3. **Open the menu:** hold **R** and push the **right stick down**. Do the same again to close it.
@@ -139,7 +139,7 @@ the SD card in `sloperinaGZ/settings.ini`, plain text you can edit. Your game sa
 ## Something's not right
 
 - **Nothing happens when I press R + right stick down.** Check the sloperinaGZ splash showed at start-up. If not,
-  sloperinaGZ isn't installed for this update of the game (it needs v131072); see [INSTALLATION.md](../INSTALLATION.md).
+  sloperinaGZ needs the module and the IPS for the active game build. See [INSTALLATION.md](../INSTALLATION.md).
 - **The game doesn't react to a button.** Frame advance takes **L** (or **R**) away from the game while it's on,
   levitate takes **L3**. Turn them off in **settings** if you need those buttons.
 - **The screen froze.** Frame advance may have paused the game: press **L + L3** (or **R + L3**).

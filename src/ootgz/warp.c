@@ -138,21 +138,21 @@ static bool add_param(const char *name, uint32_t type, const void *value)
 /* Destroy the request as the node does: base vtable into both sub-objects, then their destructor. */
 static void destroy_request(void)
 {
-  uintptr_t base_vtable = MAIN(Z64HD_EVENT_REQ_SUB_VT) + VTABLE_FIRST_ENTRY;
+  uintptr_t base_vtable = MAIN(z64hd_game->event_req_sub_vt) + VTABLE_FIRST_ENTRY;
   *(uintptr_t *)(request + Z64HD_EVENT_REQ_SUB_B) = base_vtable;
-  MAIN_FN(req_dtor_t, Z64HD_EVENT_REQ_SUB_DTOR)(request + Z64HD_EVENT_REQ_SUB_B);
+  MAIN_FN(req_dtor_t, z64hd_game->event_req_sub_dtor)(request + Z64HD_EVENT_REQ_SUB_B);
   *(uintptr_t *)(request + Z64HD_EVENT_REQ_SUB_A) = base_vtable;
-  MAIN_FN(req_dtor_t, Z64HD_EVENT_REQ_SUB_DTOR)(request + Z64HD_EVENT_REQ_SUB_A);
+  MAIN_FN(req_dtor_t, z64hd_game->event_req_sub_dtor)(request + Z64HD_EVENT_REQ_SUB_A);
 }
 
 static bool request_warp_event(const warp_map_t *map, const spawn_t *spawn)
 {
-  uintptr_t manager_holder = sys_ptr(MAIN(Z64HD_EVENT_MGR_PTR));
+  uintptr_t manager_holder = sys_ptr(MAIN(z64hd_game->event_mgr_ptr));
   void *manager = (void *)(manager_holder ? sys_ptr(manager_holder) : 0);
   if (!manager)
     return false;
   memset(request, 0, sizeof(request));
-  MAIN_FN(req_ctor_t, Z64HD_EVENT_REQ_CTOR)(request);
+  MAIN_FN(req_ctor_t, z64hd_game->event_req_ctor)(request);
   set_game_string(request + Z64HD_EVENT_REQ_NAME, "Dm_SY_BancChangeGo");
   snprintf(pos_air, sizeof(pos_air), "%s_Air", spawn->pos);
   static const bool no = false;
@@ -162,7 +162,7 @@ static bool request_warp_event(const warp_map_t *map, const spawn_t *spawn)
             add_param("BootEventName", Z64HD_EVENT_PARAM_STRING, arrival_event(spawn)) &&
             add_param("IsCheckAir", Z64HD_EVENT_PARAM_BOOL, &no);
   if (ok)
-    ok = MAIN_FN(req_submit_t, Z64HD_EVENT_REQ_SUBMIT)(manager, request);
+    ok = MAIN_FN(req_submit_t, z64hd_game->event_req_submit)(manager, request);
   destroy_request();
   return ok;
 }

@@ -7,17 +7,16 @@
 #   ./install.sh --uninstall ...      remove sloperinaGZ instead (your settings stay)
 #   ./install.sh --yes ...            don't ask before replacing files
 #
-# It copies two files (the module, subsdk9, and the patch that loads it, <build id>.ips) and the translation
+# It copies the module (subsdk9), the game-version patches and the translation
 # template into the layout each emulator or Atmosphere reads. Nothing else on your system is changed.
 set -e
 
 TITLE=0400486024DEC000
 TITLE_LC=0400486024dec000
 NAME=sloperinaGZ
-BUILD=E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348
+BUILDS="33FA6C2C23848282A77E8B88A0A93F4887C55920 E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348"
 HERE=$(cd "$(dirname "$0")" && pwd)
 MODULE="$HERE/files/subsdk9"
-PATCH="$HERE/files/$BUILD.ips"
 TEMPLATE="$HERE/files/lang/template.json"
 
 UNINSTALL=0
@@ -32,7 +31,9 @@ done
 TARGET=${1:-}
 TPATH=${2:-}
 
-for f in "$MODULE" "$PATCH"; do
+[ -f "$MODULE" ] || { echo "Missing $MODULE. Run this from the unzipped release folder."; exit 1; }
+for build in $BUILDS; do
+  f="$HERE/files/$build.ips"
   [ -f "$f" ] || { echo "Missing $f. Run this from the unzipped release folder."; exit 1; }
 done
 
@@ -87,7 +88,7 @@ layout() { # kind dir: sets EXEFS PATCHDIR LANGDIR OLD REMOVE
 }
 
 echo "sloperinaGZ installer"
-echo "For The Legend of Zelda: Ocarina of Time (Switch 2), update v131072."
+echo "For The Legend of Zelda: Ocarina of Time (Switch 2), versions 1.0.0 and 1.1.1."
 
 if [ -z "$TARGET" ]; then
   echo
@@ -132,10 +133,20 @@ if [ "$UNINSTALL" = 1 ]; then
   echo "Done. Your settings (in the SD card's $NAME folder) were kept; delete that folder to remove them too."
 else
   echo; echo "Installing sloperinaGZ in $TPATH"
+  patch_dest=${PATCHDIR:-$EXEFS}
+  replace_ok "$EXEFS/subsdk9" || exit 0
+  for build in $BUILDS; do
+    replace_ok "$patch_dest/$build.ips" || exit 0
+  done
   remove "$OLD" "  (an older ootgz install: two copies would clash)"
-  copy_one "$MODULE" "$EXEFS" subsdk9
-  if [ -n "$PATCHDIR" ]; then copy_one "$PATCH" "$PATCHDIR" "$BUILD.ips"; else copy_one "$PATCH" "$EXEFS" "$BUILD.ips"; fi
+  (
+    YES=1
+    for build in $BUILDS; do
+      copy_one "$HERE/files/$build.ips" "$patch_dest" "$build.ips"
+    done
+    copy_one "$MODULE" "$EXEFS" subsdk9
+  )
   [ -f "$TEMPLATE" ] && copy_one "$TEMPLATE" "$LANGDIR" template.json
   echo; echo "Done. Start the game and press R + right stick down for the menu."
-  [ "$KIND" = switch ] && echo "Put the SD card back in the console and start the game with Atmosphere."
+  if [ "$KIND" = switch ]; then echo "Put the SD card back in the console and start the game with Atmosphere."; fi
 fi

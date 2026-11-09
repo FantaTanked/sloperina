@@ -31,8 +31,10 @@
 #include "pouch.h"
 #include "sys.h"
 #include "z64hd.h"
+#include "z64hd_builds.h"
 
 uintptr_t z64hd_main;
+const struct z64hd_build *z64hd_game;
 
 /* exported by main */
 extern void nnMain(void);
@@ -285,7 +287,8 @@ static void first_frame(void)
 {
   menus_build();
   settings_load();
-  log_printf("running (patch v%d, main %#lx)", OOTGZ_PATCH_VERSION, (unsigned long)z64hd_main);
+  log_printf("running on game %s (patch v%d, main %#lx)", z64hd_game->version,
+             OOTGZ_PATCH_VERSION, (unsigned long)z64hd_main);
   menus_splash();
 }
 
@@ -323,7 +326,7 @@ static void frame(void)
  * Unlock first, exactly as the site did, then do our work. */
 __attribute__((used)) uint64_t ootgz_frame_entry(void *lock)
 {
-  uint64_t result = MAIN_FN(gd_unlock_t, Z64HD_GD_UNLOCK)(lock);
+  uint64_t result = MAIN_FN(gd_unlock_t, z64hd_game->gd_unlock)(lock);
   frame();
   return result;
 }
@@ -339,37 +342,60 @@ static uint32_t encode_branch(uintptr_t from, uintptr_t to)
   return A64_B_OPCODE | (uint32_t)(((intptr_t)(to - from) >> 2) & A64_B_IMM26_MASK);
 }
 
-#define MARKER_LEN         8 /* OOTGZ_MARKER's bytes at the start of the cave */
-#define CAVE_VERSION_OFF   8 /* then the patch version (u32) */
+/* nnMain is resolved by rtld. Check the matching main header before reading any game offsets. */
+static const struct z64hd_build *detect_build(uintptr_t nnmain)
+{
+  for (size_t i = 0; i < sizeof(z64hd_builds) / sizeof(*z64hd_builds); i++) {
+    const struct z64hd_build *build = &z64hd_builds[i];
+    uintptr_t base = nnmain - build->nnmain;
+    uint32_t mod0, magic;
+    if (sys_read32(base + 4, &mod0) && mod0 == build->mod0 &&
+        sys_read32(base + mod0, &magic) && magic == 0x30444F4D) /* MOD0 */
+      return build;
+  }
+  return 0;
+}
 
-/* Runs inside rtld's DT_INIT: no sdk calls (log_raw only), just checks and the slot.
- * Returns why the hook can't be installed, or 0 if it can. */
+/* Runs inside rtld's DT_INIT: no SDK calls, just checked reads and the slot. */
 static const char *patch_problem(void)
 {
-  const uint8_t *cave = (const uint8_t *)MAIN(Z64HD_CAVE_START);
+  const uint8_t *cave = (const uint8_t *)MAIN(z64hd_game->cave_start);
+  if (!sys_mapped((uintptr_t)cave, 16, SYS_PERM_R))
+    return "patch marker is not mapped";
   const char *marker = OOTGZ_MARKER;
-  for (int i = 0; i < MARKER_LEN; i++)
+  for (int i = 0; i < 8; i++)
     if (cave[i] != (uint8_t)marker[i])
       return "no ootgz patch in main: install the .ips next to subsdk9";
-  if (*(const uint32_t *)(cave + CAVE_VERSION_OFF) != OOTGZ_PATCH_VERSION)
-    return "the ootgz patch in main is a different version: install the matching .ips";
-  uint32_t site = *(const uint32_t *)MAIN(Z64HD_FRAME_SITE);
-  if (site != encode_branch(MAIN(Z64HD_FRAME_SITE), MAIN(Z64HD_CAVE_START + OOTGZ_STUB_OFF)))
+  if (*(const uint32_t *)(cave + 8) != OOTGZ_PATCH_VERSION ||
+      *(const uint32_t *)(cave + 12) != z64hd_game->revision)
+    return "patch version or game revision mismatch: install the matching .ips";
+  uintptr_t site_addr = MAIN(z64hd_game->frame_site);
+  uintptr_t stub = MAIN(z64hd_game->cave_start + OOTGZ_STUB_OFF);
+  uint32_t site;
+  if (!sys_read32(site_addr, &site) || site != encode_branch(site_addr, stub))
     return "frame site not patched (another mod on the same site, e.g. ootmenu?)";
-  if (*(volatile uintptr_t *)MAIN(Z64HD_HOOK_SLOT) != 0)
-    return "hook slot in main's bss is not empty; not hooking (update Z64HD_HOOK_SLOT)";
+  uintptr_t slot = MAIN(z64hd_game->hook_slot);
+  if (!sys_mapped(slot, sizeof(uintptr_t), SYS_PERM_R | SYS_PERM_W) ||
+      *(volatile uintptr_t *)slot != 0)
+    return "hook slot in main's bss is unavailable";
   return 0;
 }
 
 __attribute__((used)) void ootgz_module_init(void)
 {
-  z64hd_main = (uintptr_t)&nnMain - Z64HD_NNMAIN;
+  z64hd_game = detect_build((uintptr_t)&nnMain);
+  if (!z64hd_game) {
+    log_raw("unsupported Ocarina of Time build");
+    return;
+  }
+  z64hd_main = (uintptr_t)&nnMain - z64hd_game->nnmain;
   const char *problem = patch_problem();
   if (problem) {
     log_raw(problem);
     return;
   }
-  *(volatile uintptr_t *)MAIN(Z64HD_HOOK_SLOT) = (uintptr_t)ootgz_frame_entry;
+  *(volatile uintptr_t *)MAIN(z64hd_game->hook_slot) = (uintptr_t)ootgz_frame_entry;
+  log_raw(z64hd_game->version);
   log_raw("frame hook installed");
 
   /* main's imports: NVN for drawing, nn::hid to hide input while the menu is open */
