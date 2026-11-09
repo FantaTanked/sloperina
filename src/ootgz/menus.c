@@ -1076,6 +1076,10 @@ static void set_corner(menu_item_t *it, int c) { watches_corner = c; }
 static void act_timer_toggle(menu_item_t *it) { timer_toggle(); }
 static void act_timer_reset(menu_item_t *it) { timer_reset(); }
 static void act_lag_reset(menu_item_t *it) { lag_reset(); }
+static void act_jump_height_reset(menu_item_t *it)
+{
+  gfx_notice(jump_height_reset() ? "jump height reset" : "jump height: Link not found");
+}
 
 /* A row of the list, gz's buttons: the red cross (remove); the wrench (show the value in debug >
  * memory) when it has an address; the label (rename it with gz's keyboard); the type switch; then
@@ -1389,6 +1393,9 @@ static void fill_watches(void)
   menu_add_action(&m_watches, "start/stop timer", act_timer_toggle, 0);
   menu_add_action(&m_watches, "reset timer", act_timer_reset, 0);
   menu_add_action(&m_watches, "reset lag counter", act_lag_reset, 0);
+  menu_item_t *jh = menu_add_action(&m_watches, "reset jump height (R + A + d-right)", act_jump_height_reset, 0);
+  if (jh)
+    jh->hint = "L: back to none (any height)";
   menu_add_return(&m_watches);
   menu_refresh(&m_watches);
   menu_item_t *sel = &m_watches.items[m_watches.selected];

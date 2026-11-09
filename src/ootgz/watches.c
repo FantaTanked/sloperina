@@ -15,7 +15,7 @@ float hypotf(float x, float y);
 
 const char *const watch_labels[W_COUNT] = {
   "x", "y", "z", "facing", "move angle", "speed", "y speed", "camera angle", "camera pitch",
-  "camera dist", "input", "stick", "lag", "timer", "frame", "map", "air wall",
+  "camera dist", "input", "stick", "lag", "timer", "frame", "map", "air wall", "jump height",
 };
 const char *const watches_corner_names[GFX_NPLACES] = { "top-left", "top-right", "bottom-left", "bottom-right",
                                                        "top-centre", "bottom-centre", "custom" };
@@ -187,6 +187,12 @@ static void input_display_frame(bool menu_open)
 #define LINK_FACING_COS 0x328
 #define LINK_FACING_SIN 0x330
 #define LINK_VELOCITY 0x388
+/* Jump height: the player object is [[link + 0x270] + 0x358]; the float at +0x18E8 is FLT_MAX after a
+ * load and each jump sets it to Link's drawn y at takeoff + 0.7 (measured live in v131072). The
+ * jumpslash launch is said to depend on it (Link must be below it). */
+#define LINK_PLAYER_PTR 0x270
+#define PLAYER_PTR 0x358
+#define PLAYER_JUMP_HEIGHT 0x18E8
 
 static const float RAD = 57.29577951f;
 
@@ -266,6 +272,24 @@ static bool link_motion(float *cos, float *sin, float vel[3])
   return true;
 }
 
+/* where the jump height float is, or 0 */
+static uintptr_t jump_height_addr(void)
+{
+  uintptr_t o = link_actor();
+  uintptr_t q = o ? sys_ptr(o + LINK_PLAYER_PTR) : 0;
+  uintptr_t p = q ? sys_ptr(q + PLAYER_PTR) : 0;
+  return p && sys_mapped(p + PLAYER_JUMP_HEIGHT, 4, SYS_PERM_R) ? p + PLAYER_JUMP_HEIGHT : 0;
+}
+
+bool jump_height_reset(void)
+{
+  uintptr_t a = jump_height_addr();
+  if (!a || !sys_mapped(a, 4, SYS_PERM_W))
+    return false;
+  *(volatile uint32_t *)a = 0x7F7FFFFFu; /* FLT_MAX */
+  return true;
+}
+
 static bool camera_look(float pos[3], float at[3])
 {
   uintptr_t c = camera();
@@ -291,6 +315,7 @@ static const dkind_t kind_of[W_COUNT] = {
   [W_SPEED] = DK_FLOAT, [W_Y_SPEED] = DK_FLOAT, [W_CAMERA_ANGLE] = DK_ANGLE, [W_CAMERA_PITCH] = DK_ANGLE,
   [W_CAMERA_DIST] = DK_FLOAT, [W_INPUT] = DK_TEXT, [W_STICK] = DK_STICK, [W_LAG] = DK_COUNT,
   [W_TIMER] = DK_TIMER, [W_FRAME] = DK_COUNT, [W_MAP] = DK_TEXT, [W_AIRWALL] = DK_TEXT,
+  [W_JUMP_HEIGHT] = DK_FLOAT,
 };
 
 /* f32: decimal; s32: whole number; x32: the float's bits. deg: degrees; hex: the game's 16-bit angle
@@ -451,6 +476,17 @@ void watch_text(watch_t w, char *buf, int len)
     case W_AIRWALL:
       airwall_link_text(buf, len);
       break;
+    case W_JUMP_HEIGHT: {
+      uintptr_t a = jump_height_addr();
+      if (a) {
+        float f = *(volatile float *)a;
+        if (f > 1e30f && t != 2) /* FLT_MAX: no jump since the load */
+          snprintf(buf, len, "%s", T("none"));
+        else
+          float_text(f, t, buf, len);
+      }
+      break;
+    }
     default:
       break;
   }
@@ -534,7 +570,7 @@ bool watch_entry_has_address(const watch_entry_t *e)
 {
   switch (e->id) {
     case W_MEMORY: case W_X: case W_Y: case W_Z: case W_FACING: case W_Y_SPEED: case W_CAMERA_ANGLE:
-    case W_CAMERA_PITCH: case W_CAMERA_DIST: case W_FRAME: case W_MAP:
+    case W_CAMERA_PITCH: case W_CAMERA_DIST: case W_FRAME: case W_MAP: case W_JUMP_HEIGHT:
       return true;
     default:
       return false;
@@ -558,6 +594,7 @@ bool watch_entry_address(const watch_entry_t *e, uintptr_t *addr, int *mw_type)
       q = camera(), a = q ? q + 0x38 : 0;
       break;
     case W_FRAME: a = MAIN(Z64HD_FRAME_COUNTER), t = MW_U32; break;
+    case W_JUMP_HEIGHT: a = jump_height_addr(); break;
     case W_MAP: a = (uintptr_t)gd_get_str(GD_STR_MAP), t = MW_X8; break;
     default: return false;
   }
@@ -612,6 +649,8 @@ void watches_frame(bool menu_open)
       timer_reset(), gfx_notice("timer reset");
     else if (input_combo(BTN_R | BTN_B | BTN_DRIGHT))
       lag_reset(), gfx_notice("lag counter reset");
+    else if (input_combo(BTN_R | BTN_A | BTN_DRIGHT))
+      gfx_notice(jump_height_reset() ? "jump height reset" : "jump height: Link not found");
     else if (input_combo(BTN_R | BTN_DRIGHT) && !(held & (BTN_A | BTN_B)))
       watches_shown = !watches_shown, gfx_notice(watches_shown ? "watches shown" : "watches hidden");
   }
