@@ -23,29 +23,32 @@ typedef void (*equip_slot_t)(uintptr_t component, int32_t slot);
 typedef void (*equip_all_t)(uintptr_t owner, int32_t zero);
 typedef void (*ui_method_t)(uintptr_t screen);
 
-static bool streq(const char *a, const char *b)
+static bool same_string(const char *a, const char *b)
 {
-  while (*a && *a == *b)
-    a++, b++;
+  while (*a && *a == *b) {
+    a++;
+    b++;
+  }
   return *a == *b;
 }
 
-static void set_name(pouch_name_t *n, const char *item)
+static void set_name(pouch_name_t *name, const char *item)
 {
   int i = 0;
-  for (; item[i] && i < (int)sizeof(n->buf) - 1; i++)
-    n->buf[i] = item[i];
-  n->buf[i] = 0;
-  n->top = n->buf;
-  n->size = sizeof(n->buf);
+  for (; item[i] && i < (int)sizeof(name->buf) - 1; i++)
+    name->buf[i] = item[i];
+  name->buf[i] = 0;
+  name->top = name->buf;
+  name->size = sizeof(name->buf);
 }
 
 static void *pouch_manager(void)
 {
-  uintptr_t p = sys_ptr(MAIN(Z64HD_POUCH_MGR_PTR));
-  return (void *)(p ? sys_ptr(p) : 0);
+  uintptr_t holder = sys_ptr(MAIN(Z64HD_POUCH_MGR_PTR));
+  return (void *)(holder ? sys_ptr(holder) : 0);
 }
 
+/* murmur3 of prefix + item + suffix (field names such as "PouchData.<item>.StockNum") */
 static uint32_t hash_prefixed(const char *prefix, const char *item, const char *suffix)
 {
   char buf[160];
@@ -55,8 +58,8 @@ static uint32_t hash_prefixed(const char *prefix, const char *item, const char *
 
 int32_t pouch_stock(const char *item)
 {
-  int32_t v;
-  return gd_get_int(hash_prefixed("PouchData.", item, ".StockNum"), &v) ? v : -1;
+  int32_t stock;
+  return gd_get_int(hash_prefixed("PouchData.", item, ".StockNum"), &stock) ? stock : -1;
 }
 
 /* --- single calls (game thread only) ------------------------------------------------------ */
@@ -91,68 +94,79 @@ bool pouch_remove_now(const char *item)
   return true;
 }
 
+/* The UI manager's screens (FINDINGS §4) */
+#define UI_MGR_SCREEN_COUNT  0x8   /* u32 */
+#define UI_MGR_SCREENS       0x10  /* pointer to an array of screen pointers */
+#define UI_MAX_SCREENS       256   /* sanity limit on the count */
+#define HUD_DPAD_WIDGET      0x330 /* the HUD screen's D-pad widget pointer */
+
 static uintptr_t ui_manager(void)
 {
-  uintptr_t p = sys_ptr(MAIN(Z64HD_UI_MGR_PTR));
-  return p ? sys_ptr(p) : 0;
+  uintptr_t holder = sys_ptr(MAIN(Z64HD_UI_MGR_PTR));
+  return holder ? sys_ptr(holder) : 0;
 }
 
-/* The UI manager's screens: count at +8, array at +0x10. pick(screen) chooses one. */
+/* The first of the UI manager's screens that pick(screen, arg) accepts, or 0. */
 static uintptr_t find_screen(bool (*pick)(uintptr_t screen, uintptr_t arg), uintptr_t arg)
 {
-  uintptr_t uim = ui_manager();
-  uint32_t cnt;
-  if (!uim || !sys_read32(uim + 8, &cnt))
+  uintptr_t ui_mgr = ui_manager();
+  uint32_t screen_count;
+  if (!ui_mgr || !sys_read32(ui_mgr + UI_MGR_SCREEN_COUNT, &screen_count))
     return 0;
-  uintptr_t arr = sys_ptr(uim + 0x10);
-  for (uint32_t i = 0; arr && i < cnt && i < 256; i++) {
-    uintptr_t s = sys_ptr(arr + 8 * i);
-    if (s && pick(s, arg))
-      return s;
+  uintptr_t screens = sys_ptr(ui_mgr + UI_MGR_SCREENS);
+  for (uint32_t i = 0; screens && i < screen_count && i < UI_MAX_SCREENS; i++) {
+    uintptr_t screen = sys_ptr(screens + 8 * i);
+    if (screen && pick(screen, arg))
+      return screen;
   }
   return 0;
 }
 
-static bool pick_vtable(uintptr_t s, uintptr_t vt) { return sys_ptr(s) == vt; }
+static bool pick_vtable(uintptr_t screen, uintptr_t vtable) { return sys_ptr(screen) == vtable; }
 
-static bool pick_hud(uintptr_t s, uintptr_t unused)
+/* the PlayerStatus (HUD) screen: the one holding the D-pad widget */
+static bool pick_hud(uintptr_t screen, uintptr_t unused)
 {
   (void)unused;
-  uintptr_t w = sys_ptr(s + 0x330);
-  return w && sys_ptr(w) == MAIN(Z64HD_VT_DPAD);
+  uintptr_t widget = sys_ptr(screen + HUD_DPAD_WIDGET);
+  return widget && sys_ptr(widget) == MAIN(Z64HD_VT_DPAD);
 }
 
 static bool call_refresh(uintptr_t screen)
 {
-  uintptr_t vt = sys_ptr(screen);
-  uintptr_t fn = vt ? sys_ptr(vt + 8 * Z64HD_UI_REFRESH) : 0;
-  if (!fn)
+  uintptr_t vtable = sys_ptr(screen);
+  uintptr_t refresh = vtable ? sys_ptr(vtable + 8 * Z64HD_UI_REFRESH) : 0;
+  if (!refresh)
     return false;
-  ((ui_method_t)fn)(screen);
+  ((ui_method_t)refresh)(screen);
   return true;
 }
 
 bool ui_refresh_now(uintptr_t vtable_off)
 {
-  uintptr_t s = find_screen(pick_vtable, MAIN(vtable_off));
-  return s && call_refresh(s);
+  uintptr_t screen = find_screen(pick_vtable, MAIN(vtable_off));
+  return screen && call_refresh(screen);
 }
 
 bool hud_refresh_now(void)
 {
-  uintptr_t s = find_screen(pick_hud, 0);
-  return s && call_refresh(s);
+  uintptr_t screen = find_screen(pick_hud, 0);
+  return screen && call_refresh(screen);
 }
 
 /* --- queued operations --------------------------------------------------------------------- */
 
-#define KEY(kind, n) ((uint32_t)(kind) << 24 | ((uint32_t)(n) & 0xFFFFFF))
-enum { K_GIVE = 1, K_GEAR, K_UNEQUIP, K_REFRESH, K_UPGRADE, K_OCARINA };
+/* A job's key: its kind in the top byte, then 24 bits that tell apart jobs of one kind (usually
+ * the item's hash), so a newer request for the same thing replaces the queued one. */
+#define JOB_KEY(kind, n) ((uint32_t)(kind) << 24 | ((uint32_t)(n) & 0xFFFFFF))
+enum { JOB_GIVE = 1, JOB_GEAR, JOB_UNEQUIP, JOB_REFRESH, JOB_UPGRADE, JOB_OCARINA };
 
-static bool job_give_here(job_t *j)
+#define EQUIP_SLOT_OCARINA 0xD /* EquipOcarina */
+
+static bool job_give_here(job_t *job)
 {
-  const char *item = (const char *)j->arg[0];
-  if (j->step == 0)
+  const char *item = (const char *)job->arg[0];
+  if (job->step == 0)
     return !pouch_add_now(item, false);
   hud_refresh_now();
   return true;
@@ -160,22 +174,23 @@ static bool job_give_here(job_t *j)
 
 void pouch_give_here(const char *item)
 {
-  job_submit(KEY(K_GIVE, murmur3(item)), job_give_here, (intptr_t)item, 0, 0, 0);
+  job_submit(JOB_KEY(JOB_GIVE, murmur3(item)), job_give_here, (intptr_t)item, 0, 0, 0);
 }
 
 /* FINDINGS §5.1 / §5.4: the pouch and PlayerStatus.Equip* are only data; Link's usable gear is
  * created by main+0x2df6c80(component, slot) (slot 0xd = EquipOcarina) and taken off by the full
- * re-apply main+0xf201b0(owner, 0) once the slot is empty. Only ocarinas use this. */
-static bool job_gear(job_t *j)
+ * re-apply main+0xf201b0(owner, 0) once the slot is empty. Only ocarinas use this.
+ * Steps: 0 change the data, 1 create / take off the gear, 2 tidy up and redraw the HUD. */
+static bool job_gear(job_t *job)
 {
-  const char *item = (const char *)j->arg[0];
-  bool remove = j->arg[1];
-  switch (j->step) {
+  const char *item = (const char *)job->arg[0];
+  bool remove = job->arg[1];
+  switch (job->step) {
     case 0: {
-      const char *cur = gd_get_str(GD_STR_OCARINA);
+      const char *equipped = gd_get_str(GD_STR_OCARINA);
       if (!remove)
         gd_set_str(GD_STR_OCARINA, item);
-      else if (cur && streq(cur, item))
+      else if (equipped && same_string(equipped, item))
         gd_set_str(GD_STR_OCARINA, "");
       if (remove)
         pouch_remove_now(item);
@@ -192,12 +207,12 @@ static bool job_gear(job_t *j)
         }
         MAIN_FN(equip_all_t, Z64HD_EQUIP_ALL_FN)(owner, 0);
       } else {
-        uintptr_t comp = link_equip_component();
-        if (!comp) {
+        uintptr_t component = link_equip_component();
+        if (!component) {
           log_printf("%s: Link's equipment component not found", item);
           return true;
         }
-        MAIN_FN(equip_slot_t, Z64HD_EQUIP_SLOT_FN)(comp, 0xD);
+        MAIN_FN(equip_slot_t, Z64HD_EQUIP_SLOT_FN)(component, EQUIP_SLOT_OCARINA);
       }
       return false;
     default:
@@ -211,58 +226,61 @@ static bool job_gear(job_t *j)
 
 void pouch_gear(const char *item, bool remove)
 {
-  job_submit(KEY(K_GEAR, murmur3(item)), job_gear, (intptr_t)item, remove, 0, 0);
+  job_submit(JOB_KEY(JOB_GEAR, murmur3(item)), job_gear, (intptr_t)item, remove, 0, 0);
 }
 
 /* --- ocarina choice ---------------------------------------------------------------------------- */
 
+enum { OCARINA_NONE, OCARINA_FAIRY, OCARINA_TIME };
 static const char *const ocarina_items[3] = { 0, "Item_Ocarina_Fairy", "Item_Ocarina_Time" };
 const char *const ocarina_names[3] = { "none", "fairy ocarina", "ocarina of time" };
 static int ocarina_wanted;
 
 static bool ocarina_busy(void)
 {
-  return job_pending(KEY(K_OCARINA, 0)) || job_pending(KEY(K_GEAR, murmur3(ocarina_items[1]))) ||
-         job_pending(KEY(K_GEAR, murmur3(ocarina_items[2])));
+  return job_pending(JOB_KEY(JOB_OCARINA, 0)) ||
+         job_pending(JOB_KEY(JOB_GEAR, murmur3(ocarina_items[OCARINA_FAIRY]))) ||
+         job_pending(JOB_KEY(JOB_GEAR, murmur3(ocarina_items[OCARINA_TIME])));
 }
 
 int pouch_ocarina(void)
 {
   if (ocarina_busy())
     return ocarina_wanted;
-  if (pouch_stock(ocarina_items[2]) > 0)
-    return 2;
-  return pouch_stock(ocarina_items[1]) > 0 ? 1 : 0;
+  if (pouch_stock(ocarina_items[OCARINA_TIME]) > 0)
+    return OCARINA_TIME;
+  return pouch_stock(ocarina_items[OCARINA_FAIRY]) > 0 ? OCARINA_FAIRY : OCARINA_NONE;
 }
 
 /* Decided when it runs (not when chosen), so it starts from what Link holds by then; it
  * queues the removal of the other ocarina and then the give, each the full gear sequence. */
-static bool job_ocarina(job_t *j)
+static bool job_ocarina(job_t *job)
 {
-  int want = (int)j->arg[0];
-  for (int o = 1; o <= 2; o++)
-    if (o != want && pouch_stock(ocarina_items[o]) > 0)
-      pouch_gear(ocarina_items[o], true);
-  if (want && pouch_stock(ocarina_items[want]) <= 0)
-    pouch_gear(ocarina_items[want], false);
+  int wanted = (int)job->arg[0];
+  for (int ocarina = OCARINA_FAIRY; ocarina <= OCARINA_TIME; ocarina++)
+    if (ocarina != wanted && pouch_stock(ocarina_items[ocarina]) > 0)
+      pouch_gear(ocarina_items[ocarina], true);
+  if (wanted && pouch_stock(ocarina_items[wanted]) <= 0)
+    pouch_gear(ocarina_items[wanted], false);
   return true;
 }
 
 void pouch_set_ocarina(int choice)
 {
-  if (choice < 0 || choice > 2)
+  if (choice < OCARINA_NONE || choice > OCARINA_TIME)
     return;
   ocarina_wanted = choice;
-  job_submit(KEY(K_OCARINA, 0), job_ocarina, choice, 0, 0, 0);
+  job_submit(JOB_KEY(JOB_OCARINA, 0), job_ocarina, choice, 0, 0, 0);
 }
 
-static bool job_unequip(job_t *j)
+/* Steps: 0 empty the slot and re-apply Link's gear, 1 redraw the HUD. */
+static bool job_unequip(job_t *job)
 {
-  int slot = (int)j->arg[0];
-  const char *item = (const char *)j->arg[1];
-  if (j->step == 0) {
-    const char *cur = gd_get_str(slot);
-    if (!cur || !streq(cur, item))
+  int slot = (int)job->arg[0];
+  const char *item = (const char *)job->arg[1];
+  if (job->step == 0) {
+    const char *worn = gd_get_str(slot);
+    if (!worn || !same_string(worn, item))
       return true;
     gd_set_str(slot, "");
     uintptr_t owner = link_equip_owner();
@@ -277,71 +295,77 @@ static bool job_unequip(job_t *j)
 
 void pouch_unequip(int str_slot, const char *item)
 {
-  job_submit(KEY(K_UNEQUIP, murmur3(item)), job_unequip, str_slot, (intptr_t)item, 0, 0);
+  job_submit(JOB_KEY(JOB_UNEQUIP, murmur3(item)), job_unequip, str_slot, (intptr_t)item, 0, 0);
 }
 
-static bool job_refresh(job_t *j)
+static bool job_refresh(job_t *job)
 {
-  ui_refresh_now((uintptr_t)j->arg[0]);
+  ui_refresh_now((uintptr_t)job->arg[0]);
   return true;
 }
 
 void pouch_refresh_screen(uintptr_t vtable_off)
 {
-  job_submit(KEY(K_REFRESH, vtable_off), job_refresh, (intptr_t)vtable_off, 0, 0, 0);
+  job_submit(JOB_KEY(JOB_REFRESH, vtable_off), job_refresh, (intptr_t)vtable_off, 0, 0, 0);
 }
 
 /* --- item buttons -------------------------------------------------------------------------- */
 
 /* The four item-button Enums (names not recovered); values are murmur3 of the choice name. */
 static const uint32_t button_slots[] = { 0x6BEE602D, 0x76F85E6D, 0xA0029837, 0xBC32CE24 };
+#define N_BUTTON_SLOTS (sizeof(button_slots) / sizeof(*button_slots))
 
 /* The item wheel keeps its own copy of the buttons and writes it back when it closes, so a
  * clear is repeated for a while (FINDINGS §5.6). */
 #define BUTTON_WATCH_FRAMES (120 * 30)
-static struct { uint32_t choice; uint32_t until; } button_watch[8];
+#define BUTTON_WATCHES 8
+static struct {
+  uint32_t choice; /* murmur3 of the choice to keep off the buttons; 0 = unused */
+  uint32_t until;  /* frame_counter() value */
+} button_watch[BUTTON_WATCHES];
 
 void pouch_clear_buttons(const char *choice)
 {
-  uint32_t h = murmur3(choice);
-  int free_slot = -1;
-  for (int i = 0; i < 8; i++) {
-    if (button_watch[i].choice == h)
+  uint32_t hash = murmur3(choice);
+  int free_slot = -1; /* the watch for this choice if there is one, else the first unused one */
+  for (int i = 0; i < BUTTON_WATCHES; i++) {
+    if (button_watch[i].choice == hash)
       free_slot = i;
     else if (!button_watch[i].choice && free_slot < 0)
       free_slot = i;
   }
   if (free_slot >= 0) {
-    button_watch[free_slot].choice = h;
+    button_watch[free_slot].choice = hash;
     button_watch[free_slot].until = frame_counter() + BUTTON_WATCH_FRAMES;
   }
 }
 
 void pouch_clear_buttons_cancel(const char *choice)
 {
-  uint32_t h = murmur3(choice);
-  for (int i = 0; i < 8; i++)
-    if (button_watch[i].choice == h)
+  uint32_t hash = murmur3(choice);
+  for (int i = 0; i < BUTTON_WATCHES; i++)
+    if (button_watch[i].choice == hash)
       button_watch[i].choice = 0;
 }
 
 void pouch_frame(void)
 {
-  uint32_t now = frame_counter(), empty = 0;
+  uint32_t now = frame_counter();
+  uint32_t empty = 0; /* murmur3("Empty"), worked out when first needed */
   bool changed = false;
-  for (int i = 0; i < 8; i++) {
+  for (int i = 0; i < BUTTON_WATCHES; i++) {
     if (!button_watch[i].choice)
       continue;
     if ((int32_t)(now - button_watch[i].until) > 0) {
       button_watch[i].choice = 0;
       continue;
     }
-    for (unsigned s = 0; s < sizeof(button_slots) / sizeof(*button_slots); s++) {
-      uint32_t v;
-      if (gd_get_enum(button_slots[s], &v) && v == button_watch[i].choice) {
+    for (unsigned slot = 0; slot < N_BUTTON_SLOTS; slot++) {
+      uint32_t on_button;
+      if (gd_get_enum(button_slots[slot], &on_button) && on_button == button_watch[i].choice) {
         if (!empty)
           empty = murmur3("Empty");
-        gd_set_enum(button_slots[s], empty);
+        gd_set_enum(button_slots[slot], empty);
         changed = true;
       }
     }
@@ -352,9 +376,11 @@ void pouch_frame(void)
 
 /* --- upgrades ------------------------------------------------------------------------------ */
 
-#define BAG3(n, h, a, b, c, pre)                                                         \
-  { n, h, 4, { "none", #a, #b, #c }, { 0, a, b, c },                                    \
-    { { 0 }, { pre "_Small" }, { pre "_Medium" }, { pre "_Large" } } }
+/* A bag with three sizes: levels none / small / medium / large, named by capacity, each held as
+ * one pouch item (<item_prefix>_Small...). */
+#define BAG3(name, hash, small, medium, large, item_prefix)                                             \
+  { name, hash, 4, { "none", #small, #medium, #large }, { 0, small, medium, large },                   \
+    { { 0 }, { item_prefix "_Small" }, { item_prefix "_Medium" }, { item_prefix "_Large" } } }
 
 const upgrade_def_t upgrades[UPG_COUNT] = {
   [UPG_STICK]  = BAG3("deku stick bag", 0x457616B0, 10, 20, 30, "Item_StickBag"),
@@ -375,93 +401,106 @@ const upgrade_def_t upgrades[UPG_COUNT] = {
                    { { 0 }, { "Item_Scale_Silver" }, { "Item_Scale_Gold" } } },
 };
 
+#define ITEMS_PER_LEVEL   2 /* upgrade_def_t.items[level][] */
+#define MAX_UPGRADE_ITEMS 8 /* 4 levels x ITEMS_PER_LEVEL */
+
 static int pending_level[UPG_COUNT] = { [0 ... UPG_COUNT - 1] = -1 };
 
 /* every pouch item an upgrade uses, once each */
-static int upgrade_items(upgrade_t u, const char **out)
+static int upgrade_items(upgrade_t upgrade, const char **out)
 {
-  const upgrade_def_t *d = &upgrades[u];
+  const upgrade_def_t *def = &upgrades[upgrade];
   int n = 0;
-  for (int l = 1; l < d->n_levels; l++)
-    for (int k = 0; k < 2; k++) {
-      const char *it = d->items[l][k];
-      bool seen = !it;
-      for (int m = 0; it && m < n; m++)
-        seen |= streq(out[m], it);
+  for (int level = 1; level < def->n_levels; level++)
+    for (int k = 0; k < ITEMS_PER_LEVEL; k++) {
+      const char *item = def->items[level][k];
+      bool seen = !item;
+      for (int m = 0; item && m < n; m++)
+        seen |= same_string(out[m], item);
       if (!seen)
-        out[n++] = it;
+        out[n++] = item;
     }
   return n;
 }
 
-static bool level_has(const upgrade_def_t *d, int level, const char *item)
+static bool level_has(const upgrade_def_t *def, int level, const char *item)
 {
-  for (int k = 0; k < 2; k++)
-    if (d->items[level][k] && streq(d->items[level][k], item))
+  for (int k = 0; k < ITEMS_PER_LEVEL; k++)
+    if (def->items[level][k] && same_string(def->items[level][k], item))
       return true;
   return false;
 }
 
+/* The level whose items are exactly the ones held; failing that, the level with the most items
+ * that are all held; 0 if none of the items is held, -1 if no level fits. */
 int upgrade_level(upgrade_t u)
 {
-  const upgrade_def_t *d = &upgrades[u];
-  const char *items[8];
-  int n = upgrade_items(u, items), best = 0, best_n = 0;
-  bool any = false;
-  for (int i = 0; i < n; i++)
-    any |= pouch_stock(items[i]) > 0;
-  if (!any)
+  const upgrade_def_t *def = &upgrades[u];
+  const char *items[MAX_UPGRADE_ITEMS];
+  int n_items = upgrade_items(u, items);
+  int best_level = 0;
+  int best_item_count = 0;
+  bool any_held = false;
+  for (int i = 0; i < n_items; i++)
+    any_held |= pouch_stock(items[i]) > 0;
+  if (!any_held)
     return 0;
-  for (int l = 1; l < d->n_levels; l++) {
-    bool exact = true, subset = true;
-    int cnt = 0;
-    for (int i = 0; i < n; i++) {
-      bool held = pouch_stock(items[i]) > 0, want = level_has(d, l, items[i]);
-      exact &= held == want;
-      subset &= !want || held;
-      cnt += want;
+  for (int level = 1; level < def->n_levels; level++) {
+    bool exact = true;  /* held == this level's items */
+    bool subset = true; /* this level's items are all held */
+    int level_item_count = 0;
+    for (int i = 0; i < n_items; i++) {
+      bool held = pouch_stock(items[i]) > 0;
+      bool wanted = level_has(def, level, items[i]);
+      exact &= held == wanted;
+      subset &= !wanted || held;
+      level_item_count += wanted;
     }
     if (exact)
-      return l;
-    if (subset && cnt > best_n)
-      best = l, best_n = cnt;
+      return level;
+    if (subset && level_item_count > best_item_count) {
+      best_level = level;
+      best_item_count = level_item_count;
+    }
   }
-  return best ? best : -1;
+  return best_level ? best_level : -1;
 }
 
 int upgrade_pending_level(upgrade_t u)
 {
-  return job_pending(KEY(K_UPGRADE, u)) ? pending_level[u] : -1;
+  return job_pending(JOB_KEY(JOB_UPGRADE, u)) ? pending_level[u] : -1;
 }
 
 /* Remove the upgrade's other items, then add the missing ones, one per frame; then write the
- * capacity and redraw the HUD (patch.set_upgrade). */
-static bool job_upgrade(job_t *j)
+ * capacity and redraw the HUD (patch.set_upgrade). job->i counts through the items twice: the
+ * first pass removes, the second adds. */
+static bool job_upgrade(job_t *job)
 {
-  upgrade_t u = (upgrade_t)j->arg[0];
-  int level = (int)j->arg[1];
-  const upgrade_def_t *d = &upgrades[u];
-  const char *items[8];
-  int n = upgrade_items(u, items);
-  while (j->i < 2 * n) {
-    int k = j->i++;
-    const char *it = items[k % n];
-    bool want = level_has(d, level, it);
-    int32_t stock = pouch_stock(it);
-    if (k < n && !want && stock > 0) {
-      pouch_remove_now(it);
-      gd_set_bool(hash_prefixed("IsGet.", it, ""), false);
+  upgrade_t upgrade = (upgrade_t)job->arg[0];
+  int level = (int)job->arg[1];
+  const upgrade_def_t *def = &upgrades[upgrade];
+  const char *items[MAX_UPGRADE_ITEMS];
+  int n_items = upgrade_items(upgrade, items);
+  while (job->i < 2 * n_items) {
+    int k = job->i++;
+    bool removing_pass = k < n_items;
+    const char *item = items[k % n_items];
+    bool wanted = level_has(def, level, item);
+    int32_t stock = pouch_stock(item);
+    if (removing_pass && !wanted && stock > 0) {
+      pouch_remove_now(item);
+      gd_set_bool(hash_prefixed("IsGet.", item, ""), false);
       return false;
     }
-    if (k >= n && want && stock == 0) {
-      pouch_add_now(it, false);
+    if (!removing_pass && wanted && stock == 0) {
+      pouch_add_now(item, false);
       return false;
     }
   }
-  if (d->capacity_hash)
-    gd_set_int(d->capacity_hash, d->capacity[level]);
+  if (def->capacity_hash)
+    gd_set_int(def->capacity_hash, def->capacity[level]);
   hud_refresh_now();
-  log_printf("%s = %s", d->name, d->level_name[level]);
+  log_printf("%s = %s", def->name, def->level_name[level]);
   return true;
 }
 
@@ -470,5 +509,5 @@ void upgrade_set(upgrade_t u, int level)
   if (u >= UPG_COUNT || level < 0 || level >= upgrades[u].n_levels)
     return;
   pending_level[u] = level;
-  job_submit(KEY(K_UPGRADE, u), job_upgrade, u, level, 0, 0);
+  job_submit(JOB_KEY(JOB_UPGRADE, u), job_upgrade, u, level, 0, 0);
 }

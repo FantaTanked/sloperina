@@ -20,40 +20,58 @@
 
 #define NSO_HEADER 0x100
 
-static uint32_t b(uint32_t from, uint32_t to)
+#define X16         16 /* the stub's scratch register (IP0: free to clobber at a branch) */
+#define STUB_INSNS  5
+#define STUB_SIZE   (STUB_INSNS * 4)
+#define MARKER_SIZE 16 /* OOTGZ_MARKER (8), the version (4), 4 zero bytes */
+
+/* --- AArch64 instruction encodings --------------------------------------------------------- */
+
+/* b to: a 26-bit word offset */
+static uint32_t insn_b(uint32_t from, uint32_t to)
 {
   return 0x14000000u | ((uint32_t)((int32_t)(to - from) >> 2) & 0x3FFFFFFu);
 }
 
-static uint32_t adrp(int rd, uint32_t from, uint32_t to)
+/* adrp rd, to's 4 KiB page: a 21-bit page offset split into immlo (2 bits) and immhi (19 bits) */
+static uint32_t insn_adrp(int rd, uint32_t from, uint32_t to)
 {
   int32_t pages = (int32_t)((to & ~0xFFFu) - (from & ~0xFFFu)) >> 12;
-  uint32_t lo = (uint32_t)pages & 3, hi = ((uint32_t)pages >> 2) & 0x7FFFF;
-  return 0x90000000u | lo << 29 | hi << 5 | (uint32_t)rd;
+  uint32_t immlo = (uint32_t)pages & 3;
+  uint32_t immhi = ((uint32_t)pages >> 2) & 0x7FFFF;
+  return 0x90000000u | immlo << 29 | immhi << 5 | (uint32_t)rd;
 }
 
-static uint32_t ldr_x(int rt, int rn, uint32_t off)
+/* ldr xt, [xn, #off]: off a multiple of 8 */
+static uint32_t insn_ldr_x(int rt, int rn, uint32_t off)
 {
   return 0xF9400000u | (off / 8) << 10 | (uint32_t)rn << 5 | (uint32_t)rt;
 }
 
-static uint32_t cbz_x(int rt, uint32_t from, uint32_t to)
+/* cbz xt, to: a 19-bit word offset */
+static uint32_t insn_cbz_x(int rt, uint32_t from, uint32_t to)
 {
   return 0xB4000000u | (((uint32_t)((int32_t)(to - from) >> 2) & 0x7FFFF) << 5) | (uint32_t)rt;
 }
 
-static uint32_t br(int rn) { return 0xD61F0000u | (uint32_t)rn << 5; }
+static uint32_t insn_br(int rn) { return 0xD61F0000u | (uint32_t)rn << 5; }
 
-static void put32(uint8_t *p, uint32_t v)
+/* --- writing the patch -------------------------------------------------------------------- */
+
+static void put_le32(uint8_t *p, uint32_t value)
 {
-  p[0] = v, p[1] = v >> 8, p[2] = v >> 16, p[3] = v >> 24;
+  p[0] = value;
+  p[1] = value >> 8;
+  p[2] = value >> 16;
+  p[3] = value >> 24;
 }
 
-static void record(FILE *f, uint32_t main_off, const uint8_t *data, uint16_t len)
+/* One IPS32 record: a big-endian u32 file offset and u16 length, then the bytes. */
+static void write_record(FILE *f, uint32_t main_off, const uint8_t *data, uint16_t len)
 {
-  uint32_t o = main_off + NSO_HEADER;
-  uint8_t h[6] = { o >> 24, o >> 16, o >> 8, o, len >> 8, len };
-  fwrite(h, 1, 6, f);
+  uint32_t offset = main_off + NSO_HEADER;
+  uint8_t header[6] = { offset >> 24, offset >> 16, offset >> 8, offset, len >> 8, len };
+  fwrite(header, 1, 6, f);
   fwrite(data, 1, len, f);
 }
 
@@ -64,26 +82,26 @@ int main(int argc, char **argv)
     return 1;
   }
   _Static_assert((Z64HD_HOOK_SLOT & 7) == 0, "slot must be 8-aligned");
-  _Static_assert(Z64HD_CAVE_START + OOTGZ_STUB_OFF + 20 <= Z64HD_CAVE_END, "stub outside cave");
+  _Static_assert(Z64HD_CAVE_START + OOTGZ_STUB_OFF + STUB_SIZE <= Z64HD_CAVE_END, "stub outside cave");
 
-  uint8_t marker[16] = { 0 };
+  uint8_t marker[MARKER_SIZE] = { 0 };
   memcpy(marker, OOTGZ_MARKER, 8);
-  put32(marker + 8, OOTGZ_PATCH_VERSION);
+  put_le32(marker + 8, OOTGZ_PATCH_VERSION);
 
-  uint32_t s = Z64HD_CAVE_START + OOTGZ_STUB_OFF;
-  uint32_t code[5] = {
-    adrp(16, s, Z64HD_HOOK_SLOT),
-    ldr_x(16, 16, Z64HD_HOOK_SLOT & 0xFFF),
-    cbz_x(16, s + 8, s + 16),
-    br(16),
-    b(s + 16, Z64HD_GD_UNLOCK),
+  uint32_t stub_at = Z64HD_CAVE_START + OOTGZ_STUB_OFF;
+  uint32_t code[STUB_INSNS] = {
+    insn_adrp(X16, stub_at, Z64HD_HOOK_SLOT),
+    insn_ldr_x(X16, X16, Z64HD_HOOK_SLOT & 0xFFF),
+    insn_cbz_x(X16, stub_at + 8, stub_at + 16), /* no hook yet: to the original branch */
+    insn_br(X16),
+    insn_b(stub_at + 16, Z64HD_GD_UNLOCK),
   };
-  uint8_t stub[20];
-  for (int i = 0; i < 5; i++)
-    put32(stub + 4 * i, code[i]);
+  uint8_t stub[STUB_SIZE];
+  for (int i = 0; i < STUB_INSNS; i++)
+    put_le32(stub + 4 * i, code[i]);
 
   uint8_t site[4];
-  put32(site, b(Z64HD_FRAME_SITE, s));
+  put_le32(site, insn_b(Z64HD_FRAME_SITE, stub_at));
 
   FILE *f = fopen(argv[1], "wb");
   if (!f) {
@@ -91,9 +109,9 @@ int main(int argc, char **argv)
     return 1;
   }
   fwrite("IPS32", 1, 5, f);
-  record(f, Z64HD_CAVE_START, marker, sizeof(marker));
-  record(f, s, stub, sizeof(stub));
-  record(f, Z64HD_FRAME_SITE, site, sizeof(site));
+  write_record(f, Z64HD_CAVE_START, marker, sizeof(marker));
+  write_record(f, stub_at, stub, sizeof(stub));
+  write_record(f, Z64HD_FRAME_SITE, site, sizeof(site));
   fwrite("EEOF", 1, 4, f);
   if (fclose(f) != 0) {
     perror(argv[1]);

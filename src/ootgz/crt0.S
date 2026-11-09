@@ -11,7 +11,7 @@
 .hidden __module_start
 __module_start:
   .word   0
-  .word   __nx_mod0 - __module_start
+  .word   __nx_mod0 - __module_start  /* offset 4: where rtld finds MOD0 */
   .ascii  "OOTGZ\0\0\0"
 
 .section .rodata.mod0, "a", %progbits

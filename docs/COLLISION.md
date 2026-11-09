@@ -40,8 +40,11 @@ collision view), coloured by kind, the way the air walls are drawn now.
 so thousands of triangles cost almost nothing. NVN needs shaders compiled by Nintendo's SDK compiler, which we
 don't have. The routes, most likely first:
 
-1. Reuse a simple shader the game has already loaded (a flat-colour one), with our own vertex buffer.
-2. Use the game's own debug drawing, if any survived in this build.
+1. Reuse a simple shader the game has already loaded (a flat-colour one), with our own vertex buffer. Candidates:
+   the game's own `debug_line_instanced`, `debug_triangle_instanced` and `debug_colored_mesh` (FINDINGS §9.2);
+   whether they're loaded at run time isn't known.
+2. Use the game's own debug drawing, if any survived in this build. Checked: compiled out. The debug draw nodes are
+   empty and the physics debug draw manager is never created (FINDINGS §9.2).
 3. Hand-build a compiled shader. Hard; not to be counted on.
 
 Time-box the research for stage 2 before committing to it.
@@ -60,7 +63,8 @@ Time-box the research for stage 2 before committing to it.
 
 ## 3. The unknowns
 
-- Whether the game keeps the compound in memory in a findable form, or sloperinaGZ must read the files.
+- Whether the game keeps the compound in memory in a findable form, or sloperinaGZ must read the files. A place to
+  start: the scene's StaticCompoundBodyMgr (FINDINGS §9.3).
 - Which of the two versions of each mesh the player's character stands on: GroundHighResSmooth (simplified) or
   GroundHighResRough (detailed). See [the layers](#layers-what-to-draw). The decoder keeps Smooth for now.
 - Moving collision (doors, blocks, lifts, chests) isn't in these files: it comes from actor packs (ShapeParam →

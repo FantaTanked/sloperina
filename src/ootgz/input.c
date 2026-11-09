@@ -13,7 +13,9 @@ typedef struct {
   uint32_t attributes;
 } npad_state_t;
 
-#define NPAD_STATE_BUF 0x100
+#define NPAD_STATE_SIZE      0x28  /* the Switch 1 state's size: the stride between states */
+#define NPAD_STATE_BUF       0x100 /* room for one state, however long the Switch 2 one is */
+#define NPAD_ATTR_CONNECTED  1u    /* NpadAttribute::IsConnected */
 
 /* nn::hid::detail::GetNpadStates(int *out_count, NpadXState *out, int count, const NpadIdType &id),
  * exported by sdk. The detail versions are what the public ones call, so they keep working
@@ -26,73 +28,88 @@ void hid_detail_handheld(int *n, void *out, int count, const uint32_t *id)
 void hid_detail_joydual(int *n, void *out, int count, const uint32_t *id)
   __asm__(DETAIL("16NpadJoyDualState"));
 
+/* NpadIdType values */
 enum { NPAD_NO1 = 0, NPAD_HANDHELD = 0x20 };
 
-static uint32_t held, pressed, repeat_mask, fired;
-static int32_t sticks[4];
-static int repeat_timer;
+/* gz-style repeat for held buttons (menu navigation), in frames */
+#define REPEAT_FIRST_DELAY 12 /* before the first repeat */
+#define REPEAT_INTERVAL    3  /* then every this many */
+
+static uint32_t buttons_held;
+static uint32_t buttons_pressed;  /* went down this frame */
+static uint32_t repeat_buttons;   /* held since they went down, so they repeat */
+static uint32_t buttons_fired;    /* pressed, or repeating this frame */
+static int32_t stick_axes[4];     /* lx, ly, rx, ry */
+static int repeat_countdown;
 bool input_block_game;
 uint32_t input_hide_from_game;
 
-static void read_one(void (*fn)(int *, void *, int, const uint32_t *), uint32_t id)
+/* Add one controller's state (one style of one NpadIdType) to this frame's input. */
+static void read_npad(void (*get_states)(int *, void *, int, const uint32_t *), uint32_t npad_id)
 {
   uint64_t buf[NPAD_STATE_BUF / 8] = { 0 };
-  int n = 0;
-  fn(&n, buf, 1, &id);
-  if (n < 1)
+  int state_count = 0;
+  get_states(&state_count, buf, 1, &npad_id);
+  if (state_count < 1)
     return;
-  npad_state_t *s = (npad_state_t *)buf;
-  if (!(s->attributes & 1)) /* IsConnected */
+  npad_state_t *state = (npad_state_t *)buf;
+  if (!(state->attributes & NPAD_ATTR_CONNECTED))
     return;
-  held |= (uint32_t)s->buttons;
-  if (s->lx || s->ly)
-    sticks[0] = s->lx, sticks[1] = s->ly;
-  if (s->rx || s->ry)
-    sticks[2] = s->rx, sticks[3] = s->ry;
+  buttons_held |= (uint32_t)state->buttons;
+  if (state->lx || state->ly) {
+    stick_axes[0] = state->lx;
+    stick_axes[1] = state->ly;
+  }
+  if (state->rx || state->ry) {
+    stick_axes[2] = state->rx;
+    stick_axes[3] = state->ry;
+  }
 }
 
 void input_update(void)
 {
-  uint32_t prev = held;
-  held = 0;
-  sticks[0] = sticks[1] = sticks[2] = sticks[3] = 0;
-  read_one(hid_detail_fullkey, NPAD_NO1);
-  read_one(hid_detail_joydual, NPAD_NO1);
-  read_one(hid_detail_handheld, NPAD_HANDHELD);
-  pressed = held & ~prev;
+  uint32_t previously_held = buttons_held;
+  buttons_held = 0;
+  stick_axes[0] = stick_axes[1] = stick_axes[2] = stick_axes[3] = 0;
+  read_npad(hid_detail_fullkey, NPAD_NO1);
+  read_npad(hid_detail_joydual, NPAD_NO1);
+  read_npad(hid_detail_handheld, NPAD_HANDHELD);
+  buttons_pressed = buttons_held & ~previously_held;
 
-  /* gz-style repeat: 12 frames before the first repeat, then every 3 */
-  fired = pressed;
-  if (pressed) {
-    repeat_mask = pressed;
-    repeat_timer = 12;
-  } else if (held & repeat_mask) {
-    repeat_mask &= held;
-    if (--repeat_timer <= 0) {
-      repeat_timer = 3;
-      fired = repeat_mask;
+  buttons_fired = buttons_pressed;
+  if (buttons_pressed) {
+    repeat_buttons = buttons_pressed;
+    repeat_countdown = REPEAT_FIRST_DELAY;
+  } else if (buttons_held & repeat_buttons) {
+    repeat_buttons &= buttons_held;
+    if (--repeat_countdown <= 0) {
+      repeat_countdown = REPEAT_INTERVAL;
+      buttons_fired = repeat_buttons;
     }
   } else {
-    repeat_mask = 0;
+    repeat_buttons = 0;
   }
 }
 
-uint32_t input_held(void) { return held; }
-uint32_t input_pressed(void) { return pressed; }
+uint32_t input_held(void) { return buttons_held; }
+uint32_t input_pressed(void) { return buttons_pressed; }
 
 bool input_combo(uint32_t mask)
 {
-  return (held & mask) == mask && (pressed & mask);
+  return (buttons_held & mask) == mask && (buttons_pressed & mask);
 }
 
 bool input_repeat(uint32_t button)
 {
-  return (fired & button) != 0;
+  return (buttons_fired & button) != 0;
 }
 
 void input_sticks(int32_t *lx, int32_t *ly, int32_t *rx, int32_t *ry)
 {
-  *lx = sticks[0], *ly = sticks[1], *rx = sticks[2], *ry = sticks[3];
+  *lx = stick_axes[0];
+  *ly = stick_axes[1];
+  *rx = stick_axes[2];
+  *ry = stick_axes[3];
 }
 
 /* --- hiding input from the game -------------------------------------------------------------
@@ -120,34 +137,41 @@ uint32_t input_force_buttons;
 bool input_force_sticks[2];
 int32_t input_force_stick[4];
 
-static void hide(void *out, int count)
+/* Edit the states the game just read: blank them while the menu is open, otherwise add frame
+ * advance's buffered input and take out the buttons the game mustn't see. */
+static void filter_game_states(void *states, int count)
 {
   if (!input_block_game && !input_hide_from_game && !input_force_active)
     return;
   for (int i = 0; i < count; i++) {
-    npad_state_t *s = (npad_state_t *)((char *)out + i * 0x28);
+    npad_state_t *state = (npad_state_t *)((char *)states + i * NPAD_STATE_SIZE);
     if (input_block_game) {
-      s->buttons = 0;
-      s->lx = s->ly = s->rx = s->ry = 0;
-    } else {
-      if (input_force_active) {
-        s->buttons |= input_force_buttons;
-        if (input_force_sticks[0])
-          s->lx = input_force_stick[0], s->ly = input_force_stick[1];
-        if (input_force_sticks[1])
-          s->rx = input_force_stick[2], s->ry = input_force_stick[3];
-      }
-      s->buttons &= ~(uint64_t)input_hide_from_game;
+      state->buttons = 0;
+      state->lx = state->ly = state->rx = state->ry = 0;
+      continue;
     }
+    if (input_force_active) {
+      state->buttons |= input_force_buttons;
+      if (input_force_sticks[0]) {
+        state->lx = input_force_stick[0];
+        state->ly = input_force_stick[1];
+      }
+      if (input_force_sticks[1]) {
+        state->rx = input_force_stick[2];
+        state->ry = input_force_stick[3];
+      }
+    }
+    state->buttons &= ~(uint64_t)input_hide_from_game;
   }
 }
 
-#define WRAP(n)                                                    \
+/* hid_wrap_N: the public GetNpadStates overload N, then filter_game_states */
+#define WRAP(n)                                                     \
   static int hid_wrap_##n(void *out, int count, const uint32_t *id) \
   {                                                                 \
-    int r = hid_public_##n(out, count, id);                         \
-    hide(out, count);                                               \
-    return r;                                                       \
+    int result = hid_public_##n(out, count, id);                    \
+    filter_game_states(out, count);                                 \
+    return result;                                                  \
   }
 WRAP(0) WRAP(1) WRAP(2) WRAP(3) WRAP(4)
 
@@ -155,11 +179,11 @@ static void *const hid_wraps[N_HID] = { hid_wrap_0, hid_wrap_1, hid_wrap_2, hid_
 
 const char *input_hook_game(uintptr_t main_base)
 {
-  const char *err = 0;
+  const char *last_error = 0;
   for (unsigned i = 0; i < N_HID; i++) {
-    const char *e = got_hook(main_base, hid_public_names[i], hid_wraps[i]);
-    if (e)
-      err = e;
+    const char *error = got_hook(main_base, hid_public_names[i], hid_wraps[i]);
+    if (error)
+      last_error = error;
   }
-  return err;
+  return last_error;
 }

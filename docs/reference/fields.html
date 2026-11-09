@@ -6,15 +6,19 @@
 <h1>Save fields</h1>
 <p>Every field in the game's <code>GameDataList</code> (romfs <code>GameData/GameDataList.Product.110.byml.zs</code>).
 Each field is keyed by the MurmurHash3 (seed 0) of its name. <b>Name</b> is the game's own name, recovered by
-hashing strings found in the game's scripts; <b>editor title</b> comes from the onif save editor where known.
-Fields with 64-bit keys (Bool64bitKey) aren't listed.</p>
+hashing strings found in the game's scripts, or in the game's memory while it runs (hover a name to see which);
+<b>editor title</b> comes from the onif save editor where known. <b>Saved</b> and <b>area change</b> come from each
+field's object in memory: whether the game keeps the field in the save slot (or another save file), and whether
+entering another area clears it (inferred, see FINDINGS §1). <b>Progress only</b> keeps the fields that are saved
+and kept across areas. Fields with 64-bit keys (Bool64bitKey) aren't listed.</p>
 <div class="controls">
   <input id="q" type="search" placeholder="search name, title or hash (e.g. ocarina, StoneOfForest, 76b18200)" autofocus>
   <select id="type"><option value="">all types</option></select>
   <label><input id="named" type="checkbox" checked> named only</label>
+  <label title="saved to the save slot and not cleared by an area change"><input id="progress" type="checkbox"> progress only</label>
   <span id="count" class="dim"></span>
 </div>
-<div class="table-wrap"><table><thead><tr><th>hash</th><th>type</th><th>name</th><th>editor title</th><th>default</th></tr></thead>
+<div class="table-wrap"><table><thead><tr><th>hash</th><th>type</th><th>name</th><th>editor title</th><th>default</th><th>saved</th><th>area change</th></tr></thead>
 <tbody id="rows"></tbody></table></div>
 <p id="more" class="dim"></p>
 </main>
@@ -22,21 +26,27 @@ Fields with 64-bit keys (Bool64bitKey) aren't listed.</p>
 <script>
 const F = window.FIELDS || [], LIMIT = 500;
 const q = document.getElementById("q"), type = document.getElementById("type"), named = document.getElementById("named");
+const progress = document.getElementById("progress");
 [...new Set(F.map(f => f.t))].sort().forEach(t => type.add(new Option(t, t)));
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const saved = f => f.s == null ? "" : f.s === 0 ? "yes" : f.s < 0 ? "no" : "file " + f.s;
 function render() {
   const words = q.value.toLowerCase().split(/\s+/).filter(Boolean), t = type.value;
   const hits = F.filter(f => (!t || f.t === t) && (!named.checked || f.n || f.e) &&
+    (!progress.checked || (f.s === 0 && !(f.r & 1))) &&
     words.every(w => (f.n + " " + f.g + " " + f.e + " " + f.h + " " + (f.v || []).join(" ")).toLowerCase().includes(w)));
   document.getElementById("count").textContent = hits.length + " of " + F.length;
   document.getElementById("rows").innerHTML = hits.slice(0, LIMIT).map(f => {
     let d = f.v ? f.v.join(" · ") : (f.m != null ? f.m + " members" : f.d);
-    return `<tr><td><code>${f.h}</code></td><td>${f.t}</td><td>${esc(f.n)}</td>` +
-           `<td>${f.g ? `<span class=dim>${esc(f.g)}:</span> ` : ""}${esc(f.e)}</td><td>${esc(d)}</td></tr>`;
+    const setting = f.s == null ? "" : ` title="reset bits 0x${f.r.toString(16)}, save file index ${f.s}"`;
+    return `<tr><td><code>${f.h}</code></td><td>${f.t}</td>` +
+           `<td${f.ns ? ` title="name found in the game's ${esc(f.ns)}"` : ""}>${esc(f.n)}</td>` +
+           `<td>${f.g ? `<span class=dim>${esc(f.g)}:</span> ` : ""}${esc(f.e)}</td><td>${esc(d)}</td>` +
+           `<td${setting}>${saved(f)}</td><td${setting}>${f.r & 1 ? "clears" : ""}</td></tr>`;
   }).join("");
   document.getElementById("more").textContent = hits.length > LIMIT ? `showing the first ${LIMIT}; refine the search to see more` : "";
 }
-[q, type, named].forEach(el => el.addEventListener("input", render));
+[q, type, named, progress].forEach(el => el.addEventListener("input", render));
 render();
 </script>
 </body></html>

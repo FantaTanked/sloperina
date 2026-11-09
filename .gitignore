@@ -35,3 +35,6 @@ desktop.ini
 
 # Personal notes
 *.local.md
+
+# private: the prompt history of the Claude Code sessions (conversation-log/export.py)
+conversation-log/

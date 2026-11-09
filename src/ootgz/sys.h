@@ -40,7 +40,7 @@ bool sys_mapped(uintptr_t addr, size_t size, uint32_t perm);
 
 /* Read a pointer at addr if addr is readable; 0 otherwise. */
 uintptr_t sys_ptr(uintptr_t addr);
-/* Read a u64/u32 if readable; returns false otherwise. */
+/* Read a u32 if readable; returns false otherwise. */
 bool sys_read32(uintptr_t addr, uint32_t *out);
 
 /* Call fn(region_start, region_size, ctx) for every mapped region with `perm`. */

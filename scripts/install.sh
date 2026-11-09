@@ -56,10 +56,12 @@ data_dir() {
   echo ""
 }
 
+# how a target lays out mods: the yuzu family, Ryujinx or Atmosphere
 kind_of() { case "$1" in ryujinx) echo ryujinx ;; switch) echo switch ;; *) echo yuzu ;; esac; }
 
+# may $1 be written? Yes if it isn't there yet or --yes was given; otherwise ask
 replace_ok() {
-  [ "$YES" = 1 ] || [ ! -e "$1" ] && return 0
+  if [ "$YES" = 1 ] || [ ! -e "$1" ]; then return 0; fi
   printf '  %s already exists. Replace it? [Y/n] ' "$1"
   read -r a
   case "$a" in ""|y|Y*) return 0 ;; *) return 1 ;; esac
@@ -70,6 +72,7 @@ copy_one() { # from to-dir to-name
   if replace_ok "$2/$3"; then cp -f "$1" "$2/$3"; echo "  copied  $2/$3"; else echo "  skipped $2/$3"; fi
 }
 
+# path note: delete path if it is there, saying so (followed by note)
 remove() { [ -e "$1" ] && { rm -rf "$1"; echo "  removed $1$2"; }; return 0; }
 
 layout() { # kind dir: sets EXEFS PATCHDIR LANGDIR OLD REMOVE

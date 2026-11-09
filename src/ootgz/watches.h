@@ -7,7 +7,8 @@
 
 typedef enum {
   W_X, W_Y, W_Z, W_FACING, W_MOVE_ANGLE, W_SPEED, W_Y_SPEED, W_CAMERA_ANGLE, W_CAMERA_PITCH,
-  W_CAMERA_DIST, W_INPUT, W_STICK, W_LAG, W_TIMER, W_FRAME, W_MAP, W_AIRWALL, W_JUMP_HEIGHT, W_COUNT
+  W_CAMERA_DIST, W_INPUT, W_STICK, W_LAG, W_TIMER, W_FRAME, W_MAP, W_AIRWALL,
+  W_JS_HEIGHT, W_COUNT /* append only: built-in IDs are saved in settings.ini */
 } watch_t;
 
 extern const char *const watch_labels[W_COUNT];
@@ -35,14 +36,14 @@ bool watch_has(watch_t w);
 bool watch_add(watch_t w);         /* false if it's already there */
 bool watch_add_memory(uintptr_t addr, int type); /* false if that address is already watched */
 void watch_remove(int index);
-void watch_set_list(const watch_t *list, int n); /* the predefined ones (settings) */
+void watch_set_list(const watch_t *list, int n); /* settings; includes JS Height if missing */
 /* an entry's label, value, and display types (and its current one) */
 void watch_entry_label(const watch_entry_t *e, char *buf, int len);
 void watch_entry_text(const watch_entry_t *e, char *buf, int len);
 const char *const *watch_entry_types(const watch_entry_t *e, int *n, int *current);
 void watch_entry_set_type(int index, int type);
 /* where the value is in memory, for the wrench (debug > memory): the built-in watches that read one
- * value (position, facing, y speed, camera, frame, map, jump height) and memory watches */
+ * value (position, facing, y speed, camera, frame, map, JS Height) and memory watches */
 bool watch_entry_has_address(const watch_entry_t *e);
 bool watch_entry_address(const watch_entry_t *e, uintptr_t *addr, int *mw_type);
 void watch_move(int index, int dir);              /* up (-1) or down (+1) the list */
@@ -66,8 +67,8 @@ void watch_text(watch_t w, char *buf, int len);
 void timer_toggle(void);
 void timer_reset(void);
 void lag_reset(void);
-/* the jump height back to FLT_MAX ("none"), as after a load; false if Link isn't there */
-bool jump_height_reset(void);
+/* JS Height back to FLT_MAX, as after a load; false if Link isn't there */
+bool js_height_reset(void);
 /* frame hook: commands (menu closed) and the on-screen panel */
 void watches_frame(bool menu_open);
 

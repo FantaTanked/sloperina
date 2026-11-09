@@ -91,12 +91,16 @@ function Get-Layout($kind, $dir) {
 }
 
 function Install-To($kind, $dir, $label) {
-  $l = Get-Layout $kind $dir
+  $layout = Get-Layout $kind $dir
   Say "`nInstalling sloperinaGZ for $label in $dir" 'Cyan'
-  foreach ($o in $l.Old) { Remove-IfThere $o '  (an older ootgz install: two copies would clash)' }
-  Copy-One $Module $l.Exefs 'subsdk9'
-  if ($l.PatchDir) { Copy-One $Patch $l.PatchDir "$BuildId.ips" } else { Copy-One $Patch $l.Exefs "$BuildId.ips" }
-  if (Test-Path $Template) { Copy-One $Template $l.Lang 'template.json' }
+  foreach ($o in $layout.Old) { Remove-IfThere $o '  (an older ootgz install: two copies would clash)' }
+  Copy-One $Module $layout.Exefs 'subsdk9'
+  if ($layout.PatchDir) {
+    Copy-One $Patch $layout.PatchDir "$BuildId.ips"
+  } else {
+    Copy-One $Patch $layout.Exefs "$BuildId.ips"
+  }
+  if (Test-Path $Template) { Copy-One $Template $layout.Lang 'template.json' }
   Say "`nDone. Start the game and press R + right stick down for the menu." 'Green'
   if ($kind -eq 'switch') {
     Say "Put the SD card back in the console and start the game with Atmosphere." 'Gray'
@@ -104,9 +108,9 @@ function Install-To($kind, $dir, $label) {
 }
 
 function Uninstall-From($kind, $dir, $label) {
-  $l = Get-Layout $kind $dir
+  $layout = Get-Layout $kind $dir
   Say "`nRemoving sloperinaGZ for $label from $dir" 'Cyan'
-  foreach ($p in $l.Remove + $l.Old) { Remove-IfThere $p '' }
+  foreach ($p in $layout.Remove + $layout.Old) { Remove-IfThere $p '' }
   Say "Done. Your settings (in the SD card's $Name folder) were kept; delete that folder to remove them too." 'Green'
 }
 

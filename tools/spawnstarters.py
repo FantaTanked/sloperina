@@ -18,34 +18,42 @@ import byml  # noqa: E402
 import gamefiles  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
+LAYOUT_SUFFIX = ".bcett.byml.zs"
+
+
+def layouts_by_map():
+    """{map name: [romfs paths of its _Static / _Dynamic layouts]}."""
+    layouts = {}
+    for path in gamefiles.nup().index:
+        if path.startswith("romfs/Banc/") and path.endswith(LAYOUT_SUFFIX):
+            base = path.rsplit("/", 1)[-1][:-len(LAYOUT_SUFFIX)]
+            for part in ("_Static", "_Dynamic"):
+                if base.endswith(part):
+                    layouts.setdefault(base[:-len(part)], []).append(path)
+    return layouts
+
+
+def collect_named_actors(node, names):
+    """Add {Name: {Gyaml, ...}} for every named placed actor (other than StartPos) anywhere in a layout."""
+    if isinstance(node, dict):
+        if "Gyaml" in node and node.get("Gyaml") != "StartPos" and node.get("Name"):
+            names.setdefault(node["Name"], set()).add(node["Gyaml"])
+        for value in node.values():
+            collect_named_actors(value, names)
+    elif isinstance(node, list):
+        for value in node:
+            collect_named_actors(value, names)
 
 
 def main():
     spawns = json.loads((ROOT / "data" / "warps.json").read_text())["spawns"]
-    layouts = {}
-    for p in gamefiles.nup().index:
-        if p.startswith("romfs/Banc/") and p.endswith(".bcett.byml.zs"):
-            base = p.rsplit("/", 1)[-1][:-len(".bcett.byml.zs")]
-            for part in ("_Static", "_Dynamic"):
-                if base.endswith(part):
-                    layouts.setdefault(base[:-len(part)], []).append(p)
+    layouts = layouts_by_map()
     out = {}
-    for m, sp in spawns.items():
+    for map_name, map_spawns in spawns.items():
         names = {}
-
-        def walk(o):
-            if isinstance(o, dict):
-                if "Gyaml" in o and o.get("Gyaml") != "StartPos" and o.get("Name"):
-                    names.setdefault(o["Name"], set()).add(o["Gyaml"])
-                for v in o.values():
-                    walk(v)
-            elif isinstance(o, list):
-                for v in o:
-                    walk(v)
-
-        for p in layouts.get(m, []):
-            walk(byml.load(gamefiles.read(p)))
-        out[m] = {pos: sorted(names.get(pos, [])) for pos, _, _ in sp}
+        for path in layouts.get(map_name, []):
+            collect_named_actors(byml.load(gamefiles.read(path)), names)
+        out[map_name] = {position: sorted(names.get(position, [])) for position, _, _ in map_spawns}
     (ROOT / "data" / "spawn_starters.json").write_text(json.dumps(out, indent=1, sort_keys=True))
     print(f"spawn_starters.json: {sum(len(v) for v in out.values())} spawns")
 

@@ -39,7 +39,16 @@
 #define GFX_ICON_RIGHT '\x0B' /* arrow_icons.png tiles 2 and 3 (0x0A is the newline, so skipped) */
 #define GFX_ICON_LEFT '\x0C'
 
-typedef enum { GFX_NORMAL, GFX_SELECTED, GFX_TITLE, GFX_DIM, GFX_NOTICE, GFX_LOG, GFX_FAINT, GFX_NSTYLES } gfx_style_t;
+typedef enum {
+  GFX_NORMAL,
+  GFX_SELECTED,
+  GFX_TITLE,
+  GFX_DIM,
+  GFX_NOTICE,
+  GFX_LOG,
+  GFX_FAINT, /* the controller's buttons not held */
+  GFX_NSTYLES
+} gfx_style_t;
 typedef enum {
   GFX_TOP_LEFT, GFX_TOP_RIGHT, GFX_BOTTOM_LEFT, GFX_BOTTOM_RIGHT, GFX_TOP_CENTRE, GFX_BOTTOM_CENTRE,
   GFX_CUSTOM, /* at (x, y), thousandths of the picture: the panel's top-left corner */

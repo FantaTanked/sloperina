@@ -9,14 +9,28 @@
 #define LOG_SOLID_FRAMES 30
 #define LOG_FADE_FRAMES 30
 #define LOG_COLS 48
+#define SPLASH_FADE_FRAMES 30
+#define OPAQUE 255 /* a row's text opacity, fully shown */
+/* a character drawn as nothing: put in a panel's corners, it gives the panel its size */
+#define FILLER 0x7F
+/* the panels' indices in gfx_screen_t */
+#define PANEL_MENU 0
+#define PANEL_HUD 1
 
-static gfx_panel_t menu, hud, input; /* drawn this frame */
+/* drawn this frame */
+static gfx_panel_t menu_panel, hud_panel, input_panel;
 static bool menu_open;
-static struct { char msg[LOG_COLS + 1]; int age; } log_lines[GFX_LOG_MAX]; /* [0] the newest */
+
+typedef struct {
+  char msg[LOG_COLS + 1];
+  int age; /* frames shown */
+} log_line_t;
+static log_line_t log_lines[GFX_LOG_MAX]; /* [0] the newest */
 volatile uint32_t gfx_log_count;
 
-static gfx_screen_t out[2];          /* published screens; out[pub] is the current one */
-static volatile int pub = -1;        /* -1: nothing shown */
+/* Published screens, double-buffered: the game thread fills one while the render thread reads the other. */
+static gfx_screen_t published_screens[2];
+static volatile int published_index = -1; /* the current one; -1: nothing shown */
 
 volatile bool gfx_on_screen;
 volatile int gfx_menu_rows = GFX_ROWS;
@@ -26,23 +40,28 @@ volatile int gfx_custom_x = -1, gfx_custom_y = -1;
 volatile int gfx_pause_icon;
 volatile uint32_t gfx_presents;
 
-static void put(gfx_panel_t *p, int col, int row, gfx_style_t style, const char *s)
+/* Write text into a panel from (col, row), clipped to the grid. */
+static void put_text(gfx_panel_t *panel, int col, int row, gfx_style_t style, const char *text)
 {
   if (row < 0 || row >= GFX_ROWS)
     return;
-  for (int c = col; c >= 0 && c < GFX_COLS && *s; c++, s++) {
-    p->ch[row][c] = *s;
-    p->style[row][c] = style;
+  for (int c = col; c >= 0 && c < GFX_COLS && *text; c++, text++) {
+    panel->ch[row][c] = *text;
+    panel->style[row][c] = style;
   }
 }
 
 void gfx_begin(void)
 {
-  memset(&menu, 0, sizeof(menu));
+  memset(&menu_panel, 0, sizeof(menu_panel));
   menu_open = true;
 }
 
-void gfx_text(int col, int row, gfx_style_t style, const char *s) { put(&menu, col, row, style, s); }
+void gfx_text(int col, int row, gfx_style_t style, const char *s)
+{
+  put_text(&menu_panel, col, row, style, s);
+}
+
 void gfx_end(void) {}
 
 void gfx_clear(void)
@@ -70,223 +89,296 @@ void gfx_logf(const char *fmt, ...)
   gfx_notice(buf);
 }
 
-/* the start-up splash (gfx_splash): shown in the log's place, then faded out as the log is */
-#define SPLASH_FADE 30
-static struct { char text[LOG_COLS + 1]; uint8_t style, indent; } splash[GFX_LOG_ROWS];
-static int n_splash, splash_frames;
+/* --- the start-up splash (gfx_splash): shown in the log's place, then faded out as the log is --- */
+
+static struct {
+  char text[LOG_COLS + 1];
+  uint8_t style;
+  uint8_t indent;
+} splash[GFX_LOG_ROWS];
+static int splash_count;
+static int splash_frames; /* left to show */
 
 void gfx_splash(const char *const *lines, const uint8_t *styles, const uint8_t *indents, int n, int frames)
 {
-  n_splash = n < GFX_LOG_ROWS ? n : GFX_LOG_ROWS;
-  for (int i = 0; i < n_splash; i++) {
+  splash_count = n < GFX_LOG_ROWS ? n : GFX_LOG_ROWS;
+  for (int i = 0; i < splash_count; i++) {
     snprintf(splash[i].text, sizeof(splash[i].text), "%s", lines[i] ? lines[i] : "");
-    splash[i].style = styles[i], splash[i].indent = indents[i];
+    splash[i].style = styles[i];
+    splash[i].indent = indents[i];
   }
   splash_frames = frames;
 }
 
-static bool build_splash(gfx_panel_t *p)
+/* The splash into the log panel, while it's shown; false once it's gone. */
+static bool build_splash(gfx_panel_t *panel)
 {
   if (splash_frames <= 0)
     return false;
   splash_frames--;
-  memset(p, 0, sizeof(*p));
-  p->corner = GFX_BOTTOM_RIGHT;
-  p->clear = true;
-  p->yoff = 1;
-  unsigned a = splash_frames >= SPLASH_FADE ? 255 : (unsigned)splash_frames * 255 / SPLASH_FADE;
+  memset(panel, 0, sizeof(*panel));
+  panel->corner = GFX_BOTTOM_RIGHT;
+  panel->clear = true;
+  panel->yoff = 1;
+  unsigned alpha =
+    splash_frames >= SPLASH_FADE_FRAMES ? OPAQUE : (unsigned)splash_frames * OPAQUE / SPLASH_FADE_FRAMES;
   int cols = 0;
-  for (int i = 0; i < n_splash; i++) {
-    int l = splash[i].indent + (int)strlen(splash[i].text);
-    cols = l > cols ? l : cols;
+  for (int i = 0; i < splash_count; i++) {
+    int width = splash[i].indent + (int)strlen(splash[i].text);
+    if (width > cols)
+      cols = width;
   }
-  for (int i = 0; i < n_splash; i++) {
-    put(p, splash[i].indent, i, (gfx_style_t)splash[i].style, splash[i].text);
-    p->alpha[i] = (uint8_t)a;
+  for (int i = 0; i < splash_count; i++) {
+    put_text(panel, splash[i].indent, i, (gfx_style_t)splash[i].style, splash[i].text);
+    panel->alpha[i] = (uint8_t)alpha;
   }
-  if (cols > 0) /* the block's size, so its right edge sits at the corner (fillers: drawn as nothing) */
-    p->ch[0][cols - 1] = p->ch[0][cols - 1] ? p->ch[0][cols - 1] : 0x7F, p->ch[n_splash - 1][0] =
-      p->ch[n_splash - 1][0] ? p->ch[n_splash - 1][0] : 0x7F;
+  /* the block's size, so its right edge sits at the corner: fillers top right and bottom left */
+  if (cols > 0) {
+    if (!panel->ch[0][cols - 1])
+      panel->ch[0][cols - 1] = FILLER;
+    if (!panel->ch[splash_count - 1][0])
+      panel->ch[splash_count - 1][0] = FILLER;
+  }
   return true;
 }
 
-/* the log panel: newest at the bottom, each line right-aligned, as gz draws it. While anything is
- * shown the panel only grows (a new size means its blend with the picture starts over, 2 frames
- * without it), and it starts small again once it's empty. */
-static void build_log(gfx_panel_t *p)
+/* --- the log (gz_log) --------------------------------------------------------------------------- */
+
+/* a log line's opacity: solid, then fading out */
+static uint8_t log_line_alpha(int age)
 {
-  static int keep_cols, keep_rows;
-  if (build_splash(p))
-    return;
-  memset(p, 0, sizeof(*p));
-  p->corner = GFX_BOTTOM_RIGHT;
-  p->clear = true;
-  p->yoff = 1; /* text in the middle of the panel (nvn.c TEXT_TOP) */
-  int n = 0, cols = 0;
-  for (int i = 0; i < GFX_LOG_MAX; i++) {
-    if (!log_lines[i].msg[0])
-      continue;
-    if (++log_lines[i].age > LOG_SOLID_FRAMES + LOG_FADE_FRAMES) {
-      log_lines[i].msg[0] = 0;
-      continue;
-    }
-    int l = (int)strlen(log_lines[i].msg);
-    if (l > cols)
-      cols = l;
-    n = i + 1;
-  }
-  if (!n) {
-    keep_cols = keep_rows = 0;
-    return;
-  }
-  if (cols > keep_cols)
-    keep_cols = cols;
-  if (n > keep_rows)
-    keep_rows = n;
-  for (int i = 0; i < n; i++) {
-    int row = keep_rows - 1 - i, age = log_lines[i].age;
-    if (!log_lines[i].msg[0])
-      continue;
-    put(p, keep_cols - (int)strlen(log_lines[i].msg), row, GFX_LOG, log_lines[i].msg);
-    p->alpha[row] = (uint8_t)(age <= LOG_SOLID_FRAMES ? 255 : 255 - (age - LOG_SOLID_FRAMES) * 255 / LOG_FADE_FRAMES);
-  }
-  /* the panel's size: a filler (drawn as nothing) in the top-left and bottom-right corners */
-  if (!p->ch[0][0])
-    p->ch[0][0] = 0x7F;
-  if (!p->ch[keep_rows - 1][keep_cols - 1])
-    p->ch[keep_rows - 1][keep_cols - 1] = 0x7F;
+  if (age <= LOG_SOLID_FRAMES)
+    return OPAQUE;
+  return (uint8_t)(OPAQUE - (age - LOG_SOLID_FRAMES) * OPAQUE / LOG_FADE_FRAMES);
 }
 
-void gfx_input_background(bool on) { input.clear = !on; }
-void gfx_input_scale(int percent) { input.scale_pct = (uint8_t)percent; }
+/* The log panel: newest at the bottom, each line right-aligned, as gz draws it. While anything is
+ * shown the panel only grows (a new size means its blend with the picture starts over, 2 frames
+ * without it), and it starts small again once it's empty. */
+static void build_log(gfx_panel_t *panel)
+{
+  static int kept_cols, kept_rows;
+  if (build_splash(panel))
+    return;
+  memset(panel, 0, sizeof(*panel));
+  panel->corner = GFX_BOTTOM_RIGHT;
+  panel->clear = true;
+  panel->yoff = 1; /* text in the middle of the panel (nvn.c TEXT_TOP) */
+  /* age the lines, dropping those that have faded out */
+  int line_count = 0;
+  int cols = 0;
+  for (int i = 0; i < GFX_LOG_MAX; i++) {
+    log_line_t *line = &log_lines[i];
+    if (!line->msg[0])
+      continue;
+    if (++line->age > LOG_SOLID_FRAMES + LOG_FADE_FRAMES) {
+      line->msg[0] = 0;
+      continue;
+    }
+    int len = (int)strlen(line->msg);
+    if (len > cols)
+      cols = len;
+    line_count = i + 1;
+  }
+  if (!line_count) {
+    kept_cols = 0;
+    kept_rows = 0;
+    return;
+  }
+  if (cols > kept_cols)
+    kept_cols = cols;
+  if (line_count > kept_rows)
+    kept_rows = line_count;
+  for (int i = 0; i < line_count; i++) {
+    const log_line_t *line = &log_lines[i];
+    int row = kept_rows - 1 - i;
+    if (!line->msg[0])
+      continue;
+    put_text(panel, kept_cols - (int)strlen(line->msg), row, GFX_LOG, line->msg);
+    panel->alpha[row] = log_line_alpha(line->age);
+  }
+  /* the panel's size: a filler in the top-left and bottom-right corners */
+  if (!panel->ch[0][0])
+    panel->ch[0][0] = FILLER;
+  if (!panel->ch[kept_rows - 1][kept_cols - 1])
+    panel->ch[kept_rows - 1][kept_cols - 1] = FILLER;
+}
+
+/* --- the input display and the watches ----------------------------------------------------------- */
+
+void gfx_input_background(bool on)
+{
+  input_panel.clear = !on;
+}
+
+void gfx_input_scale(int percent)
+{
+  input_panel.scale_pct = (uint8_t)percent;
+}
 
 void gfx_input(int col, int row, gfx_style_t style, const char *s)
 {
-  input.corner = GFX_BOTTOM_LEFT;
-  input.yoff = 1; /* text in the middle of the panel (nvn.c TEXT_TOP) */
+  input_panel.corner = GFX_BOTTOM_LEFT;
+  input_panel.yoff = 1; /* text in the middle of the panel (nvn.c TEXT_TOP) */
   if (row >= 0 && row < GFX_ROWS)
-    input.alpha[row] = 255;
-  put(&input, col, row, style, s);
+    input_panel.alpha[row] = OPAQUE;
+  put_text(&input_panel, col, row, style, s);
 }
 
 void gfx_input_pad(const int8_t sticks[4], uint8_t clicks)
 {
-  input.pad = 1;
-  memcpy(input.sticks, sticks, 4);
-  input.clicks = clicks;
+  input_panel.pad = 1;
+  memcpy(input_panel.sticks, sticks, 4);
+  input_panel.clicks = clicks;
 }
 
 void gfx_hud_at(int x_permille, int y_permille)
 {
-  hud.x = (int16_t)x_permille, hud.y = (int16_t)y_permille;
+  hud_panel.x = (int16_t)x_permille;
+  hud_panel.y = (int16_t)y_permille;
 }
 
 void gfx_hud(gfx_corner_t corner, int row, gfx_style_t style, const char *s)
 {
-  hud.corner = corner;
-  hud.yoff = 1; /* text in the middle of the panel (nvn.c TEXT_TOP) */
-  put(&hud, 0, row, style, s);
+  hud_panel.corner = corner;
+  hud_panel.yoff = 1; /* text in the middle of the panel (nvn.c TEXT_TOP) */
+  put_text(&hud_panel, 0, row, style, s);
 }
 
 /* --- log fallback (until drawing works) ------------------------------------------------- */
 
-static uint32_t logged_hash, logged_sel;
-static int since_log;
+#define MENU_LOG_INTERVAL 120 /* frames */
 
-static void log_menu(const gfx_panel_t *s)
+static uint32_t logged_menu_hash, logged_selection;
+static int frames_since_logged;
+
+/* a menu character as plain text for the log (the icons as look-alikes) */
+static char plain_char(char ch)
 {
-  if (!s) {
-    if (logged_hash)
+  switch (ch) {
+    case GFX_CHECK_OFF: return 'o';
+    case GFX_CHECK_ON: return 'x';
+    case GFX_ICON_REMOVE: return '-';
+    case GFX_ICON_FOLDER: return '+';
+    case GFX_ICON_WRENCH: return '*';
+    case GFX_ICON_UP: return '^';
+    case GFX_ICON_DOWN: return 'v';
+    case GFX_ICON_ADD: return '+';
+    case GFX_ICON_LEFT: return '<';
+    case GFX_ICON_RIGHT: return '>';
+    case 0:
+    case GFX_WIDE_REST: return ' ';
+    default: return ch;
+  }
+}
+
+static void log_menu(const gfx_panel_t *menu)
+{
+  if (!menu) {
+    if (logged_menu_hash)
       log_printf("---- menu closed ----");
-    logged_hash = logged_sel = 0;
+    logged_menu_hash = 0;
+    logged_selection = 0;
     return;
   }
   /* at once when the selection or title changes, otherwise at most every 2 s */
-  uint32_t sel = 0;
-  for (int r = 0; r < s->rows; r++)
-    for (int c = 0; c < s->cols; c++)
-      if (s->style[r][c] == GFX_SELECTED || s->style[r][c] == GFX_TITLE)
-        sel = sel * 31 + (uint8_t)s->ch[r][c] + r;
-  since_log++;
-  if (s->hash == logged_hash || (sel == logged_sel && since_log < 120))
+  uint32_t selection = 0;
+  for (int r = 0; r < menu->rows; r++)
+    for (int c = 0; c < menu->cols; c++)
+      if (menu->style[r][c] == GFX_SELECTED || menu->style[r][c] == GFX_TITLE)
+        selection = selection * 31 + (uint8_t)menu->ch[r][c] + r;
+  frames_since_logged++;
+  if (menu->hash == logged_menu_hash || (selection == logged_selection && frames_since_logged < MENU_LOG_INTERVAL))
     return;
-  logged_hash = s->hash;
-  logged_sel = sel;
-  since_log = 0;
+  logged_menu_hash = menu->hash;
+  logged_selection = selection;
+  frames_since_logged = 0;
   log_printf("---- menu ----");
-  for (int r = 0; r < s->rows; r++) {
+  for (int r = 0; r < menu->rows; r++) {
+    /* "> " before the selected row, then the row without trailing spaces */
     char line[GFX_COLS + 3];
     bool selected = false;
     for (int c = 0; c < GFX_COLS; c++) {
-      char ch = s->ch[r][c];
-      line[c + 2] = ch == GFX_CHECK_OFF ? 'o' : ch == GFX_CHECK_ON ? 'x' : ch == GFX_ICON_REMOVE ? '-'
-                  : ch == GFX_ICON_FOLDER ? '+' : ch == GFX_ICON_WRENCH ? '*' : ch == GFX_ICON_UP ? '^' : ch == GFX_ICON_DOWN ? 'v' : ch == GFX_ICON_ADD ? '+' : ch == GFX_ICON_LEFT ? '<' : ch == GFX_ICON_RIGHT ? '>' : !ch || ch == GFX_WIDE_REST ? ' ' : ch;
-      selected |= s->style[r][c] == GFX_SELECTED;
+      line[c + 2] = plain_char(menu->ch[r][c]);
+      selected |= menu->style[r][c] == GFX_SELECTED;
     }
     line[0] = selected ? '>' : ' ';
     line[1] = ' ';
-    int n = GFX_COLS + 2;
-    while (n > 0 && line[n - 1] == ' ')
-      n--;
-    line[n] = 0;
+    int len = GFX_COLS + 2;
+    while (len > 0 && line[len - 1] == ' ')
+      len--;
+    line[len] = 0;
     log_printf("%s", line);
   }
 }
 
 /* --- publish ------------------------------------------------------------------------------ */
 
-static void measure(gfx_panel_t *p)
+/* FNV-1a */
+#define FNV_OFFSET_BASIS 2166136261u
+#define FNV_PRIME 16777619u
+
+static inline uint32_t hash_mix(uint32_t hash, uint32_t value)
 {
-  p->rows = p->cols = 0;
-  uint32_t h = 2166136261u ^ p->corner ^ (uint32_t)p->clear << 8; /* the shadow depends on clear */
-  h = (h ^ (uint32_t)p->pad << 9 ^ (uint32_t)p->clicks << 10 ^ (uint32_t)(uint8_t)p->yoff << 12 ^
-       (uint32_t)p->scale_pct << 16) * 16777619u;
+  return (hash ^ value) * FNV_PRIME;
+}
+
+/* Set a panel's used area (rows, cols) and the hash of everything that changes how it's drawn. */
+static void measure_panel(gfx_panel_t *panel)
+{
+  panel->rows = 0;
+  panel->cols = 0;
+  uint32_t hash = FNV_OFFSET_BASIS ^ panel->corner ^ (uint32_t)panel->clear << 8; /* the shadow depends on clear */
+  hash = hash_mix(hash, (uint32_t)panel->pad << 9 ^ (uint32_t)panel->clicks << 10 ^
+                          (uint32_t)(uint8_t)panel->yoff << 12 ^ (uint32_t)panel->scale_pct << 16);
   for (int i = 0; i < 4; i++) /* the sticks are drawn from these */
-    h = (h ^ (uint8_t)p->sticks[i]) * 16777619u;
+    hash = hash_mix(hash, (uint8_t)panel->sticks[i]);
   for (int r = 0; r < GFX_ROWS; r++)
     for (int c = 0; c < GFX_COLS; c++) {
-      if (p->ch[r][c] && p->ch[r][c] != ' ') {
-        if (r + 1 > p->rows)
-          p->rows = r + 1;
-        if (c + 1 > p->cols)
-          p->cols = c + 1;
+      if (panel->ch[r][c] && panel->ch[r][c] != ' ') {
+        if (r + 1 > panel->rows)
+          panel->rows = r + 1;
+        if (c + 1 > panel->cols)
+          panel->cols = c + 1;
       }
-      h = (h ^ (uint8_t)p->ch[r][c] ^ (uint32_t)p->style[r][c] << 8) * 16777619u;
+      hash = hash_mix(hash, (uint8_t)panel->ch[r][c] ^ (uint32_t)panel->style[r][c] << 8);
     }
-  p->hash = h ? h : 1;
+  panel->hash = hash ? hash : 1;
 }
 
 void gfx_frame(void)
 {
-  int next = pub == 0 ? 1 : 0;
-  gfx_screen_t *s = &out[next];
+  int next = published_index == 0 ? 1 : 0;
+  gfx_screen_t *screen = &published_screens[next];
 
-  gfx_panel_t *p = &s->panel[0];
+  gfx_panel_t *menu = &screen->panel[PANEL_MENU];
   if (menu_open)
-    *p = menu;
+    *menu = menu_panel;
   else
-    memset(p, 0, sizeof(*p));
-  p->corner = GFX_TOP_LEFT;
-  measure(p);
+    memset(menu, 0, sizeof(*menu));
+  menu->corner = GFX_TOP_LEFT;
+  measure_panel(menu);
 
-  s->panel[1] = hud;
-  measure(&s->panel[1]);
-  memset(&hud, 0, sizeof(hud));
+  /* the watches and the input display are drawn afresh each frame */
+  screen->panel[PANEL_HUD] = hud_panel;
+  measure_panel(&screen->panel[PANEL_HUD]);
+  memset(&hud_panel, 0, sizeof(hud_panel));
 
-  build_log(&s->panel[GFX_PANEL_LOG]);
-  measure(&s->panel[GFX_PANEL_LOG]);
-  s->panel[GFX_PANEL_INPUT] = input;
-  measure(&s->panel[GFX_PANEL_INPUT]);
-  memset(&input, 0, sizeof(input));
+  build_log(&screen->panel[GFX_PANEL_LOG]);
+  measure_panel(&screen->panel[GFX_PANEL_LOG]);
+  screen->panel[GFX_PANEL_INPUT] = input_panel;
+  measure_panel(&screen->panel[GFX_PANEL_INPUT]);
+  memset(&input_panel, 0, sizeof(input_panel));
 
-  bool any = s->panel[0].rows || s->panel[1].rows || s->panel[GFX_PANEL_LOG].rows || s->panel[GFX_PANEL_INPUT].rows;
-  __atomic_store_n(&pub, any ? next : -1, __ATOMIC_RELEASE);
+  bool anything = screen->panel[PANEL_MENU].rows || screen->panel[PANEL_HUD].rows ||
+                  screen->panel[GFX_PANEL_LOG].rows || screen->panel[GFX_PANEL_INPUT].rows;
+  __atomic_store_n(&published_index, anything ? next : -1, __ATOMIC_RELEASE);
   if (!gfx_on_screen)
-    log_menu(menu_open ? &s->panel[0] : 0);
+    log_menu(menu_open ? menu : 0);
 }
 
 const gfx_screen_t *gfx_published(void)
 {
-  int p = __atomic_load_n(&pub, __ATOMIC_ACQUIRE);
-  return p < 0 ? 0 : &out[p];
+  int index = __atomic_load_n(&published_index, __ATOMIC_ACQUIRE);
+  return index < 0 ? 0 : &published_screens[index];
 }

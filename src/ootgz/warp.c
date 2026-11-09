@@ -27,43 +27,61 @@
  * and this arrival (Dm_SY_Ocarina › OcarinaWarp's EventReserveBancChange); it needs no starter. */
 #define NO_STARTER_ARRIVAL "OcarinaWarp_Arrive"
 
-static const char *arrival_event(const spawn_t *s)
+#define WARP_TIMEOUT_FRAMES (300 * 30) /* how long an armed fallback waits for an exit */
+#define REQUEST_TIMEOUT_FRAMES 90      /* the event writes the reserved map within this, or we fall back */
+
+bool warp_arrival_cutscenes;
+
+static const warp_map_t *target_map;
+static const spawn_t *target_spawn;
+static enum {
+  WARP_NONE,
+  WARP_ARMED,      /* fallback: waiting for Link to take an exit */
+  WARP_DONE,
+  WARP_SKIPPED,
+  WARP_CANCELLED,
+  WARP_TIMED_OUT,
+  WARP_REQUESTED,  /* instant: waiting for the event to reserve our map */
+} state;
+static uint32_t deadline_frame;
+static char state_text[96];
+
+static bool str_equal(const char *a, const char *b)
 {
-  if (!s->starter)
+  while (*a && *a == *b) {
+    a++;
+    b++;
+  }
+  return *a == *b;
+}
+
+static bool deadline_passed(void)
+{
+  return (int32_t)(frame_counter() - deadline_frame) > 0;
+}
+
+static const char *arrival_event(const spawn_t *spawn)
+{
+  if (!spawn->starter)
     return NO_STARTER_ARRIVAL;
-  return warp_arrival_cutscenes ? s->event : STANDARD_ARRIVAL;
+  return warp_arrival_cutscenes ? spawn->event : STANDARD_ARRIVAL;
 }
 
 /* After the game has reserved our map: what the event's own reservation got wrong for spawns
  * without a starter (Dm_SY_BancChangeGo always names the spawn as the starter). */
-static void fix_reservation(const spawn_t *s)
+static void fix_reservation(const spawn_t *spawn)
 {
-  if (s->starter)
+  if (spawn->starter)
     return;
   gd_set_str(GD_STR_STARTER, "");
   gd_set_str(GD_STR_EVENT, NO_STARTER_ARRIVAL);
 }
-#define WARP_TIMEOUT_FRAMES (300 * 30)
-#define REQUEST_TIMEOUT_FRAMES 90 /* the event writes the reserved map within this, or we fall back */
-
-bool warp_arrival_cutscenes;
-
-static const warp_map_t *w_map;
-static const spawn_t *w_spawn;
-static enum { W_NONE, W_ARMED, W_DONE, W_SKIPPED, W_CANCELLED, W_TIMED_OUT, W_REQUESTED } w_state;
-static uint32_t w_deadline;
-static char w_text[96];
 
 static bool is_dungeon(const char *name)
 {
   for (int i = 0; i < data_n_warp_maps; i++)
-    if (data_warp_maps[i].dungeon) {
-      const char *a = data_warp_maps[i].name, *b = name;
-      while (*a && *a == *b)
-        a++, b++;
-      if (*a == *b)
-        return true;
-    }
+    if (data_warp_maps[i].dungeon && str_equal(data_warp_maps[i].name, name))
+      return true;
   return false;
 }
 
@@ -73,46 +91,69 @@ typedef void (*req_ctor_t)(void *req);
 typedef bool (*req_submit_t)(void *mgr, void *req);
 typedef void (*req_dtor_t)(void *sub);
 
+/* The game's strings here are a char * buffer followed by its u32 capacity. */
+#define STRING_CAPACITY 0x8
+#define REQ_PARAMS_CAPACITY 0x0  /* u32: how many param entries the array holds */
+#define PARAM_TYPE 0x0           /* u32 */
+#define PARAM_NAME 0x8           /* string */
+#define PARAM_VALUE 0x98         /* u8 for a bool, else a pointer */
+#define VTABLE_FIRST_ENTRY 0x10  /* an object's vtable pointer skips the offset-to-top and type info */
+
 static _Alignas(16) uint8_t request[Z64HD_EVENT_REQ_SIZE]; /* game thread only */
 static char pos_air[GD_STR_LEN + 8];
 
-static void copy_str(char *dst, uint32_t cap, const char *src)
+/* Copy src into the game's string buffer of `capacity` bytes, cut short if need be. */
+static void copy_str(char *dst, uint32_t capacity, const char *src)
 {
   uint32_t i = 0;
-  for (; cap && i < cap - 1 && src[i]; i++)
+  for (; capacity && i < capacity - 1 && src[i]; i++)
     dst[i] = src[i];
-  if (cap)
+  if (capacity)
     dst[i] = 0;
+}
+
+static void set_game_string(uint8_t *string_field, const char *src)
+{
+  copy_str(*(char **)string_field, *(uint32_t *)(string_field + STRING_CAPACITY), src);
 }
 
 static bool add_param(const char *name, uint32_t type, const void *value)
 {
   uint32_t *count = (uint32_t *)(request + Z64HD_EVENT_REQ_NPARAMS);
-  uint32_t cap = *(uint32_t *)request;
+  uint32_t capacity = *(uint32_t *)(request + REQ_PARAMS_CAPACITY);
   uint8_t *array = *(uint8_t **)(request + Z64HD_EVENT_REQ_PARAMS);
-  if (!array || *count >= cap)
+  if (!array || *count >= capacity)
     return false;
-  uint8_t *e = array + (size_t)*count * Z64HD_EVENT_PARAM_SIZE;
-  copy_str(*(char **)(e + 8), *(uint32_t *)(e + 0x10), name);
-  *(uint32_t *)e = type;
+  uint8_t *entry = array + (size_t)*count * Z64HD_EVENT_PARAM_SIZE;
+  set_game_string(entry + PARAM_NAME, name);
+  *(uint32_t *)(entry + PARAM_TYPE) = type;
   if (type == Z64HD_EVENT_PARAM_BOOL)
-    *(uint8_t *)(e + 0x98) = *(const bool *)value;
+    *(uint8_t *)(entry + PARAM_VALUE) = *(const bool *)value;
   else
-    *(const void **)(e + 0x98) = value;
+    *(const void **)(entry + PARAM_VALUE) = value;
   ++*count;
   return true;
 }
 
+/* Destroy the request as the node does: base vtable into both sub-objects, then their destructor. */
+static void destroy_request(void)
+{
+  uintptr_t base_vtable = MAIN(Z64HD_EVENT_REQ_SUB_VT) + VTABLE_FIRST_ENTRY;
+  *(uintptr_t *)(request + Z64HD_EVENT_REQ_SUB_B) = base_vtable;
+  MAIN_FN(req_dtor_t, Z64HD_EVENT_REQ_SUB_DTOR)(request + Z64HD_EVENT_REQ_SUB_B);
+  *(uintptr_t *)(request + Z64HD_EVENT_REQ_SUB_A) = base_vtable;
+  MAIN_FN(req_dtor_t, Z64HD_EVENT_REQ_SUB_DTOR)(request + Z64HD_EVENT_REQ_SUB_A);
+}
+
 static bool request_warp_event(const warp_map_t *map, const spawn_t *spawn)
 {
-  uintptr_t p = sys_ptr(MAIN(Z64HD_EVENT_MGR_PTR));
-  void *mgr = (void *)(p ? sys_ptr(p) : 0);
-  if (!mgr)
+  uintptr_t manager_holder = sys_ptr(MAIN(Z64HD_EVENT_MGR_PTR));
+  void *manager = (void *)(manager_holder ? sys_ptr(manager_holder) : 0);
+  if (!manager)
     return false;
   memset(request, 0, sizeof(request));
   MAIN_FN(req_ctor_t, Z64HD_EVENT_REQ_CTOR)(request);
-  copy_str(*(char **)(request + Z64HD_EVENT_REQ_NAME), *(uint32_t *)(request + Z64HD_EVENT_REQ_NAME + 8),
-           "Dm_SY_BancChangeGo");
+  set_game_string(request + Z64HD_EVENT_REQ_NAME, "Dm_SY_BancChangeGo");
   snprintf(pos_air, sizeof(pos_air), "%s_Air", spawn->pos);
   static const bool no = false;
   bool ok = add_param("NextBanc", Z64HD_EVENT_PARAM_STRING, map->name) &&
@@ -121,13 +162,8 @@ static bool request_warp_event(const warp_map_t *map, const spawn_t *spawn)
             add_param("BootEventName", Z64HD_EVENT_PARAM_STRING, arrival_event(spawn)) &&
             add_param("IsCheckAir", Z64HD_EVENT_PARAM_BOOL, &no);
   if (ok)
-    ok = MAIN_FN(req_submit_t, Z64HD_EVENT_REQ_SUBMIT)(mgr, request);
-  /* destroy it as the node does: base vtable into both sub-objects, then their destructor */
-  uintptr_t vt = MAIN(Z64HD_EVENT_REQ_SUB_VT) + 0x10;
-  *(uintptr_t *)(request + Z64HD_EVENT_REQ_SUB_B) = vt;
-  MAIN_FN(req_dtor_t, Z64HD_EVENT_REQ_SUB_DTOR)(request + Z64HD_EVENT_REQ_SUB_B);
-  *(uintptr_t *)(request + Z64HD_EVENT_REQ_SUB_A) = vt;
-  MAIN_FN(req_dtor_t, Z64HD_EVENT_REQ_SUB_DTOR)(request + Z64HD_EVENT_REQ_SUB_A);
+    ok = MAIN_FN(req_submit_t, Z64HD_EVENT_REQ_SUBMIT)(manager, request);
+  destroy_request();
   return ok;
 }
 
@@ -139,23 +175,23 @@ static void arm_exit_swap(const warp_map_t *map, const spawn_t *spawn)
     gfx_notice("can't warp: game data not found");
     return;
   }
-  w_map = map;
-  w_spawn = spawn;
-  w_state = W_ARMED;
-  w_deadline = frame_counter() + WARP_TIMEOUT_FRAMES;
+  target_map = map;
+  target_spawn = spawn;
+  state = WARP_ARMED;
+  deadline_frame = frame_counter() + WARP_TIMEOUT_FRAMES;
   log_printf("warp armed: %s / %s", map->name, spawn->pos);
   gfx_notice("warp ready: walk through any exit or loading zone");
 }
 
 void warp_arm(const warp_map_t *map, const spawn_t *spawn)
 {
-  if (w_state == W_ARMED)
-    w_state = W_CANCELLED;
+  if (state == WARP_ARMED)
+    state = WARP_CANCELLED;
   if (request_warp_event(map, spawn)) {
-    w_map = map;
-    w_spawn = spawn;
-    w_state = W_REQUESTED;
-    w_deadline = frame_counter() + REQUEST_TIMEOUT_FRAMES;
+    target_map = map;
+    target_spawn = spawn;
+    state = WARP_REQUESTED;
+    deadline_frame = frame_counter() + REQUEST_TIMEOUT_FRAMES;
     log_printf("warp: requested Dm_SY_BancChangeGo to %s / %s", map->name, spawn->pos);
     return;
   }
@@ -165,40 +201,36 @@ void warp_arm(const warp_map_t *map, const spawn_t *spawn)
 
 void warp_cancel(void)
 {
-  if (w_state == W_ARMED || w_state == W_REQUESTED) {
-    w_state = W_CANCELLED;
+  if (state == WARP_ARMED || state == WARP_REQUESTED) {
+    state = WARP_CANCELLED;
     gfx_notice("warp cancelled");
   } else {
     gfx_notice("no warp armed");
   }
 }
 
-static bool same_str(const char *a, const char *b)
+/* --- frame -------------------------------------------------------------------------------------- */
+
+/* Instant warp: wait for the event's EventReserveBancChange to write our map into
+ * Sequence_ReservedNextBanc. */
+static void wait_for_reservation(void)
 {
-  while (*a && *a == *b)
-    a++, b++;
-  return *a == *b;
+  const char *next = gd_get_str(GD_STR_NEXT_MAP);
+  if (next && str_equal(next, target_map->name)) {
+    fix_reservation(target_spawn);
+    state = WARP_DONE;
+    log_printf("warp: the game reserved %s%s", next, target_spawn->starter ? "" : " (no starter: warp-song arrival)");
+  } else if (deadline_passed()) {
+    log_printf("warp: the event didn't start; falling back to the next exit");
+    arm_exit_swap(target_map, target_spawn);
+  }
 }
 
-void warp_frame(void)
+/* Fallback: once Link takes an exit (the game fills the next map in), put our destination there. */
+static void swap_exit_destination(void)
 {
-  if (w_state == W_REQUESTED) {
-    /* the event's EventReserveBancChange writes our map into Sequence_ReservedNextBanc */
-    const char *next = gd_get_str(GD_STR_NEXT_MAP);
-    if (next && same_str(next, w_map->name)) {
-      fix_reservation(w_spawn);
-      w_state = W_DONE;
-      log_printf("warp: the game reserved %s%s", next, w_spawn->starter ? "" : " (no starter: warp-song arrival)");
-    } else if ((int32_t)(frame_counter() - w_deadline) > 0) {
-      log_printf("warp: the event didn't start; falling back to the next exit");
-      arm_exit_swap(w_map, w_spawn);
-    }
-    return;
-  }
-  if (w_state != W_ARMED)
-    return;
-  if ((int32_t)(frame_counter() - w_deadline) > 0) {
-    w_state = W_TIMED_OUT;
+  if (deadline_passed()) {
+    state = WARP_TIMED_OUT;
     gfx_notice("warp timed out");
     return;
   }
@@ -206,25 +238,33 @@ void warp_frame(void)
   if (!next || !next[0])
     return;
   if (is_dungeon(next)) {
-    w_state = W_SKIPPED;
+    state = WARP_SKIPPED;
     log_printf("warp skipped: the exit leads into %s", next);
     gfx_notice("warp skipped: that exit is a dungeon door; warp again from there");
     return;
   }
-  gd_set_str(GD_STR_NEXT_MAP, w_map->name);
-  gd_set_str(GD_STR_SPAWN, w_spawn->pos);
-  gd_set_str(GD_STR_STARTER, w_spawn->starter ? w_spawn->pos : "");
-  gd_set_str(GD_STR_EVENT, arrival_event(w_spawn));
-  w_state = W_DONE;
-  log_printf("warp: %s replaced by %s / %s", next, w_map->name, w_spawn->pos);
+  gd_set_str(GD_STR_NEXT_MAP, target_map->name);
+  gd_set_str(GD_STR_SPAWN, target_spawn->pos);
+  gd_set_str(GD_STR_STARTER, target_spawn->starter ? target_spawn->pos : "");
+  gd_set_str(GD_STR_EVENT, arrival_event(target_spawn));
+  state = WARP_DONE;
+  log_printf("warp: %s replaced by %s / %s", next, target_map->name, target_spawn->pos);
+}
+
+void warp_frame(void)
+{
+  if (state == WARP_REQUESTED)
+    wait_for_reservation();
+  else if (state == WARP_ARMED)
+    swap_exit_destination();
 }
 
 const char *warp_state(void)
 {
-  static const char *const names[] = { "none", "armed", "done", "skipped (dungeon door)", "cancelled",
-                                       "timed out", "starting" };
-  if (w_state == W_NONE)
+  static const char *const state_names[] = { "none", "armed", "done", "skipped (dungeon door)", "cancelled",
+                                             "timed out", "starting" };
+  if (state == WARP_NONE)
     return "none";
-  snprintf(w_text, sizeof(w_text), "%s: %s", names[w_state], w_map->label);
-  return w_text;
+  snprintf(state_text, sizeof(state_text), "%s: %s", state_names[state], target_map->label);
+  return state_text;
 }

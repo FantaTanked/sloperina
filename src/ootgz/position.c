@@ -73,11 +73,15 @@ void position_save(void)
     gfx_notice("save position: Link not found");
     return;
   }
-  sx = p.x, sy = p.y, sz = p.z;
+  sx = p.x;
+  sy = p.y;
+  sz = p.z;
   sfx = sfz = 0;
   double fx, fz;
-  if (link_facing(&fx, &fz))
-    sfx = fx, sfz = fz;
+  if (link_facing(&fx, &fz)) {
+    sfx = fx;
+    sfz = fz;
+  }
   const char *m = gd_get_str(GD_STR_MAP);
   snprintf(smap, sizeof(smap), "%s", m ? m : "");
   saved = true;
@@ -145,10 +149,13 @@ void position_frame(bool menu_open)
     position_load();
 
   link_record_status_t st = link_record_status();
-  if (finding && st == REC_READY)
-    finding = false, gfx_notice("found Link's position: save / load position ready");
-  else if (finding && st == REC_FAILED)
-    finding = pending = false, gfx_notice("Link's position not found, move around and try again");
+  if (finding && st == REC_READY) {
+    finding = false;
+    gfx_notice("found Link's position: save / load position ready");
+  } else if (finding && st == REC_FAILED) {
+    finding = pending = false;
+    gfx_notice("Link's position not found, move around and try again");
+  }
 
   if (pending && st == REC_READY && !(input_held() & LOAD_COMBO)) {
     pending = false;

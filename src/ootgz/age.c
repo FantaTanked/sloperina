@@ -20,7 +20,7 @@
 #define F_OTHER_WEAPON 0xA1F7EE2Bu /* PlayerStatus.AnotherEraEquipWeapon */
 #define F_OTHER_SHIELD 0x2342B619u /* PlayerStatus.AnotherEraEquipShield */
 
-static int wanted = -1;
+static int wanted_age = -1; /* -1: follow the game's */
 
 int age_current(void)
 {
@@ -30,136 +30,173 @@ int age_current(void)
   return child ? AGE_CHILD : AGE_ADULT;
 }
 
-int age_wanted(void) { return wanted >= 0 ? wanted : age_current(); }
-void age_want(int age) { wanted = age == AGE_ADULT ? AGE_ADULT : AGE_CHILD; }
-
-static bool same(const char *a, const char *b)
+int age_wanted(void)
 {
-  while (*a && *a == *b)
-    a++, b++;
+  return wanted_age >= 0 ? wanted_age : age_current();
+}
+
+void age_want(int age)
+{
+  wanted_age = age == AGE_ADULT ? AGE_ADULT : AGE_CHILD;
+}
+
+/* --- string helpers ---------------------------------------------------------------------------- */
+
+static bool str_equal(const char *a, const char *b)
+{
+  while (*a && *a == *b) {
+    a++;
+    b++;
+  }
   return *a == *b;
 }
 
-static bool starts(const char *s, const char *p)
+static bool starts_with(const char *str, const char *prefix)
 {
-  while (*p && *s == *p)
-    s++, p++;
-  return !*p;
+  while (*prefix && *str == *prefix) {
+    str++;
+    prefix++;
+  }
+  return !*prefix;
 }
+
+static const char *or_unknown(const char *str)
+{
+  return str ? str : "?";
+}
+
+/* --- maps -------------------------------------------------------------------------------------- */
 
 static const warp_map_t *find_map(const char *name)
 {
   for (int i = 0; i < data_n_warp_maps; i++)
-    if (same(data_warp_maps[i].name, name))
+    if (str_equal(data_warp_maps[i].name, name))
       return &data_warp_maps[i];
   return 0;
 }
 
-/* name's version for `age` into out: X_Child <-> X_Adult (X_Adult_Alternative -> X_Child). false if
- * the map has an age and the other version isn't known. */
+/* The version of map `name` for `age`, into out: X_Child <-> X_Adult (X_Adult_Alternative -> X_Child).
+ * False if the map has an age and its other version isn't known. */
 static bool age_version(const char *name, int age, char *out, int len)
 {
-  const char *u = name;
+  const char *age_suffix = name;
   for (const char *p = name; *p; p++)
-    if (starts(p, "_Child") || starts(p, "_Adult")) {
-      u = p;
+    if (starts_with(p, "_Child") || starts_with(p, "_Adult")) {
+      age_suffix = p;
       break;
     }
-  if (u == name) { /* no age in the name: shared */
+  if (age_suffix == name) { /* no age in the name: shared by both */
     snprintf(out, len, "%s", name);
     return true;
   }
-  bool is_child = starts(u, "_Child");
-  if ((age == AGE_CHILD) == is_child) {
+  bool is_child_map = starts_with(age_suffix, "_Child");
+  if ((age == AGE_CHILD) == is_child_map) {
     snprintf(out, len, "%s", name);
     return true;
   }
-  snprintf(out, len, "%.*s%s", (int)(u - name), name, age == AGE_CHILD ? "_Child" : "_Adult");
+  snprintf(out, len, "%.*s%s", (int)(age_suffix - name), name, age == AGE_CHILD ? "_Child" : "_Adult");
   return find_map(out) != 0;
 }
 
-static void swap_str(int a, int b)
+/* The spawn to reload map at: the start point Link last arrived at, else an entrance an exit leads
+ * to, else the map's first. */
+static const spawn_t *find_reload_spawn(const warp_map_t *map, const char *last_start)
 {
-  const char *pa = gd_get_str(a), *pb = gd_get_str(b);
-  if (!pa || !pb)
-    return;
-  char ta[GD_STR_LEN], tb[GD_STR_LEN];
-  snprintf(ta, sizeof(ta), "%s", pa);
-  snprintf(tb, sizeof(tb), "%s", pb);
-  gd_set_str(a, tb);
-  gd_set_str(b, ta);
+  const spawn_t *spawns = &data_spawns[map->first];
+  if (last_start && last_start[0])
+    for (int i = 0; i < map->n; i++)
+      if (str_equal(spawns[i].pos, last_start))
+        return &spawns[i];
+  for (int i = 0; i < map->n; i++)
+    if (spawns[i].starter)
+      return &spawns[i];
+  return map->n ? &spawns[0] : 0;
 }
 
-static void take_off_adult(int slot)
+/* --- age --------------------------------------------------------------------------------------- */
+
+static void swap_strings(int index_a, int index_b)
 {
-  const char *v = gd_get_str(slot);
-  if (v && starts(v, "Armor_Adult_"))
+  const char *value_a = gd_get_str(index_a);
+  const char *value_b = gd_get_str(index_b);
+  if (!value_a || !value_b)
+    return;
+  char copy_a[GD_STR_LEN], copy_b[GD_STR_LEN];
+  snprintf(copy_a, sizeof(copy_a), "%s", value_a);
+  snprintf(copy_b, sizeof(copy_b), "%s", value_b);
+  gd_set_str(index_a, copy_b);
+  gd_set_str(index_b, copy_a);
+}
+
+static void take_off_adult_only(int slot)
+{
+  const char *item = gd_get_str(slot);
+  if (item && starts_with(item, "Armor_Adult_"))
     gd_set_str(slot, "");
 }
 
 static void apply_age(int age)
 {
-  int ow = gd_str_index(F_OTHER_WEAPON), os = gd_str_index(F_OTHER_SHIELD);
+  int other_weapon = gd_str_index(F_OTHER_WEAPON);
+  int other_shield = gd_str_index(F_OTHER_SHIELD);
   log_printf("age: %s (sword %s, shield %s; other age's %d, %d)", age == AGE_CHILD ? "child" : "adult",
-             gd_get_str(GD_STR_SWORD) ? gd_get_str(GD_STR_SWORD) : "?",
-             gd_get_str(GD_STR_SHIELD) ? gd_get_str(GD_STR_SHIELD) : "?", ow, os);
-  if (ow >= 0)
-    swap_str(GD_STR_SWORD, ow);
-  if (os >= 0)
-    swap_str(GD_STR_SHIELD, os);
+             or_unknown(gd_get_str(GD_STR_SWORD)), or_unknown(gd_get_str(GD_STR_SHIELD)), other_weapon,
+             other_shield);
+  if (other_weapon >= 0)
+    swap_strings(GD_STR_SWORD, other_weapon);
+  if (other_shield >= 0)
+    swap_strings(GD_STR_SHIELD, other_shield);
   if (age == AGE_CHILD) {
-    take_off_adult(GD_STR_TUNIC);
-    take_off_adult(GD_STR_BOOTS);
+    take_off_adult_only(GD_STR_TUNIC);
+    take_off_adult_only(GD_STR_BOOTS);
   }
   gd_set_bool(F_IS_CHILDHOOD, age == AGE_CHILD);
 }
 
-/* warp_arm keeps the pointers until the map has changed */
-static warp_map_t any_map;
-static spawn_t any_spawn;
-static char any_name[GD_STR_LEN], any_pos[GD_STR_LEN];
+/* --- reload ------------------------------------------------------------------------------------ */
+
+/* A map the warp list doesn't know. Static: warp_arm keeps the pointers until the map has changed. */
+static warp_map_t unlisted_map;
+static spawn_t unlisted_spawn;
+static char unlisted_name[GD_STR_LEN], unlisted_pos[GD_STR_LEN];
 
 void age_reload_map(void)
 {
-  const char *cur = gd_get_str(GD_STR_MAP), *last = gd_get_str(GD_STR_SPAWN);
-  int now = age_current(), age = age_wanted();
-  if (!cur || !cur[0] || now < 0) {
+  const char *current_map = gd_get_str(GD_STR_MAP);
+  const char *last_start = gd_get_str(GD_STR_SPAWN);
+  int current_age = age_current();
+  int age = age_wanted();
+  if (!current_map || !current_map[0] || current_age < 0) {
     gfx_notice("can't reload: game data not found");
     return;
   }
   char name[GD_STR_LEN];
-  if (!age_version(cur, age, name, sizeof(name))) {
+  if (!age_version(current_map, age, name, sizeof(name))) {
     gfx_notice(age == AGE_CHILD ? "this map has no child version" : "this map has no adult version");
     return;
   }
-  log_printf("reload: %s -> %s, last start point \"%s\", age %d -> %d", cur, name, last ? last : "?", now, age);
+  log_printf("reload: %s -> %s, last start point \"%s\", age %d -> %d", current_map, name,
+             last_start ? last_start : "?", current_age, age);
   const warp_map_t *map = find_map(name);
   const spawn_t *spawn = 0;
   if (map) {
-    for (int i = 0; i < map->n && last && last[0] && !spawn; i++)
-      if (same(data_spawns[map->first + i].pos, last))
-        spawn = &data_spawns[map->first + i];
-    for (int i = 0; i < map->n && !spawn; i++) /* an entrance an exit leads to */
-      if (data_spawns[map->first + i].starter)
-        spawn = &data_spawns[map->first + i];
-    if (!spawn && map->n)
-      spawn = &data_spawns[map->first];
-  } else if (last && last[0]) {
+    spawn = find_reload_spawn(map, last_start);
+  } else if (last_start && last_start[0]) {
     /* a map the warps don't list (houses, shops...): its last start point, arriving as from a
      * warp song (no starter actor needed) */
-    snprintf(any_name, sizeof(any_name), "%s", name);
-    snprintf(any_pos, sizeof(any_pos), "%s", last);
-    any_map = (warp_map_t){ any_name, any_name, WC_OTHER, 0, 0, 0 };
-    any_spawn = (spawn_t){ any_pos, any_pos, "Dm_SY_BancChangeArrive", 0 };
-    map = &any_map;
-    spawn = &any_spawn;
+    snprintf(unlisted_name, sizeof(unlisted_name), "%s", name);
+    snprintf(unlisted_pos, sizeof(unlisted_pos), "%s", last_start);
+    unlisted_map = (warp_map_t){ unlisted_name, unlisted_name, WC_OTHER, 0, 0, 0 };
+    unlisted_spawn = (spawn_t){ unlisted_pos, unlisted_pos, "Dm_SY_BancChangeArrive", 0 };
+    map = &unlisted_map;
+    spawn = &unlisted_spawn;
   }
   if (!map || !spawn) {
     gfx_notice("can't reload: no start point known for this map");
     return;
   }
-  if (age != now)
+  if (age != current_age)
     apply_age(age);
-  wanted = -1; /* from now on, follow the game's again */
+  wanted_age = -1; /* from now on, follow the game's again */
   warp_arm(map, spawn);
 }

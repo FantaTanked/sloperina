@@ -5,6 +5,8 @@
 #include "lang.h"
 #include "sys.h"
 
+/* --- the item pool --------------------------------------------------------------------------- */
+
 #define POOL_ITEMS 1400
 
 static menu_item_t pool[POOL_ITEMS];
@@ -13,162 +15,188 @@ static int pool_used;
 menu_t *menu_current;
 static menu_t *menu_last; /* where the menu was when it closed; it reopens there */
 
-void menu_init(menu_t *m, const char *title, int cap)
+void menu_init(menu_t *menu, const char *title, int cap)
 {
-  menu_t *parent = m->parent; /* may already be linked by menu_add_submenu */
-  memset(m, 0, sizeof(*m));
-  m->parent = parent;
-  m->title = title;
+  menu_t *parent = menu->parent; /* may already be linked by menu_add_submenu */
+  memset(menu, 0, sizeof(*menu));
+  menu->parent = parent;
+  menu->title = title;
   if (pool_used + cap > POOL_ITEMS) {
     log_printf("menu pool full (%s)", title);
     cap = POOL_ITEMS - pool_used;
   }
-  m->items = &pool[pool_used];
-  m->cap = cap;
+  menu->items = &pool[pool_used];
+  menu->cap = cap;
   pool_used += cap;
 }
 
-menu_item_t *menu_add(menu_t *m, menu_item_kind_t kind, const char *label)
+/* --- adding items ---------------------------------------------------------------------------- */
+
+menu_item_t *menu_add(menu_t *menu, menu_item_kind_t kind, const char *label)
 {
-  if (m->n_items >= m->cap) {
-    log_printf("menu %s: more than %d items", m->title, m->cap);
+  if (menu->n_items >= menu->cap) {
+    log_printf("menu %s: more than %d items", menu->title, menu->cap);
     return 0;
   }
-  menu_item_t *it = &m->items[m->n_items++];
-  memset(it, 0, sizeof(*it));
-  it->kind = kind;
-  it->label = label;
-  it->indent = m->grouping && kind != MI_BACK;
-  return it;
+  menu_item_t *item = &menu->items[menu->n_items++];
+  memset(item, 0, sizeof(*item));
+  item->kind = kind;
+  item->label = label;
+  item->indent = menu->grouping && kind != MI_BACK;
+  return item;
 }
 
-menu_item_t *menu_add_submenu(menu_t *m, const char *label, menu_t *sub)
+menu_item_t *menu_add_submenu(menu_t *menu, const char *label, menu_t *sub)
 {
-  menu_item_t *it = menu_add(m, MI_SUBMENU, label);
-  if (it) {
-    it->submenu = sub;
-    sub->parent = m;
+  menu_item_t *item = menu_add(menu, MI_SUBMENU, label);
+  if (item) {
+    item->submenu = sub;
+    sub->parent = menu;
   }
-  return it;
+  return item;
 }
 
-menu_item_t *menu_add_action(menu_t *m, const char *label, void (*fn)(menu_item_t *), intptr_t data)
+menu_item_t *menu_add_action(menu_t *menu, const char *label, void (*fn)(menu_item_t *), intptr_t data)
 {
-  menu_item_t *it = menu_add(m, MI_ACTION, label);
-  if (it)
-    it->action = fn, it->data = data;
-  return it;
+  menu_item_t *item = menu_add(menu, MI_ACTION, label);
+  if (item) {
+    item->action = fn;
+    item->data = data;
+  }
+  return item;
 }
 
-menu_item_t *menu_add_check(menu_t *m, const char *label, bool (*get)(menu_item_t *),
+menu_item_t *menu_add_check(menu_t *menu, const char *label, bool (*get)(menu_item_t *),
                             void (*set)(menu_item_t *, bool), intptr_t data)
 {
-  menu_item_t *it = menu_add(m, MI_CHECK, label);
-  if (it)
-    it->get_check = get, it->set_check = set, it->data = data;
-  return it;
+  menu_item_t *item = menu_add(menu, MI_CHECK, label);
+  if (item) {
+    item->get_check = get;
+    item->set_check = set;
+    item->data = data;
+  }
+  return item;
 }
 
-menu_item_t *menu_add_option(menu_t *m, const char *label, int n, const char *const *choices,
+menu_item_t *menu_add_option(menu_t *menu, const char *label, int n, const char *const *choices,
                              int (*get)(menu_item_t *), void (*set)(menu_item_t *, int), intptr_t data)
 {
-  menu_item_t *it = menu_add(m, MI_OPTION, label);
-  if (it) {
-    it->n_choices = n, it->choices = choices;
-    it->get_option = get, it->set_option = set, it->data = data;
+  menu_item_t *item = menu_add(menu, MI_OPTION, label);
+  if (item) {
+    item->n_choices = n;
+    item->choices = choices;
+    item->get_option = get;
+    item->set_option = set;
+    item->data = data;
   }
-  return it;
+  return item;
 }
 
-menu_item_t *menu_add_number(menu_t *m, const char *label, int32_t (*get)(menu_item_t *),
+menu_item_t *menu_add_number(menu_t *menu, const char *label, int32_t (*get)(menu_item_t *),
                              void (*set)(menu_item_t *, int32_t), int32_t (*max)(menu_item_t *),
                              void (*fill)(menu_item_t *), intptr_t data)
 {
-  menu_item_t *it = menu_add(m, MI_NUMBER, label);
-  if (it)
-    it->get_num = get, it->set_num = set, it->num_max = max, it->action = fill, it->data = data;
-  return it;
+  menu_item_t *item = menu_add(menu, MI_NUMBER, label);
+  if (item) {
+    item->get_num = get;
+    item->set_num = set;
+    item->num_max = max;
+    item->action = fill;
+    item->data = data;
+  }
+  return item;
 }
 
-menu_item_t *menu_add_text(menu_t *m, void (*text)(menu_item_t *, char *, int), intptr_t data)
+menu_item_t *menu_add_text(menu_t *menu, void (*text)(menu_item_t *, char *, int), intptr_t data)
 {
-  menu_item_t *it = menu_add(m, MI_TEXT, 0);
-  if (it)
-    it->text = text, it->data = data;
-  return it;
+  menu_item_t *item = menu_add(menu, MI_TEXT, 0);
+  if (item) {
+    item->text = text;
+    item->data = data;
+  }
+  return item;
 }
 
-static void heading_text(menu_item_t *it, char *buf, int len) { snprintf(buf, len, "%s", T(it->label)); }
+static void heading_text(menu_item_t *item, char *buf, int len) { snprintf(buf, len, "%s", T(item->label)); }
 
-menu_item_t *menu_add_heading(menu_t *m, const char *label)
+menu_item_t *menu_add_heading(menu_t *menu, const char *label)
 {
-  m->grouping = false;
-  menu_item_t *it = menu_add(m, MI_TEXT, label);
-  if (it)
-    it->text = heading_text;
-  m->grouping = true;
-  return it;
+  menu->grouping = false; /* the heading itself isn't indented */
+  menu_item_t *item = menu_add(menu, MI_TEXT, label);
+  if (item)
+    item->text = heading_text;
+  menu->grouping = true;
+  return item;
 }
 
-void menu_end_group(menu_t *m) { m->grouping = false; }
+void menu_end_group(menu_t *menu) { menu->grouping = false; }
 
-menu_item_t *menu_add_return(menu_t *m)
+menu_item_t *menu_add_return(menu_t *menu)
 {
-  return menu_add(m, MI_BACK, "return");
+  return menu_add(menu, MI_BACK, "return");
 }
 
-static bool selectable(menu_item_t *it) { return it->kind != MI_TEXT; }
+/* --- selection and navigation ---------------------------------------------------------------- */
 
-static void move(menu_t *m, int dir)
+static bool selectable(const menu_item_t *item) { return item->kind != MI_TEXT; }
+
+/* Moves the selection by one (-1 up, +1 down) to the next item that can be chosen, wrapping round. */
+static void move_selection(menu_t *menu, int direction)
 {
-  int part = m->n_items ? m->items[m->selected].part : 0;
-  bool from_parts = m->n_items && m->items[m->selected].n_parts > 1;
-  for (int n = 0; n < m->n_items; n++) {
-    m->selected = (m->selected + dir + m->n_items) % m->n_items;
-    menu_item_t *it = &m->items[m->selected];
-    if (selectable(it)) {
-      /* rows of buttons: the cursor stays in its column, as gz's does */
-      if (it->n_parts > 1)
-        it->part = from_parts ? (part < it->n_parts ? part : it->n_parts - 1) : 0;
-      return;
+  int column = menu->n_items ? menu->items[menu->selected].part : 0;
+  bool from_button_row = menu->n_items && menu->items[menu->selected].n_parts > 1;
+  for (int tries = 0; tries < menu->n_items; tries++) {
+    menu->selected = (menu->selected + direction + menu->n_items) % menu->n_items;
+    menu_item_t *item = &menu->items[menu->selected];
+    if (!selectable(item))
+      continue;
+    /* rows of buttons: the cursor stays in its column, as gz's does */
+    if (item->n_parts > 1) {
+      if (!from_button_row)
+        item->part = 0;
+      else
+        item->part = column < item->n_parts ? column : item->n_parts - 1;
+    }
+    return;
+  }
+}
+
+void menu_refresh(menu_t *menu)
+{
+  if (menu->selected >= menu->n_items)
+    menu->selected = menu->n_items ? menu->n_items - 1 : 0;
+  if (menu->n_items && !selectable(&menu->items[menu->selected])) {
+    int previous = menu->selected;
+    move_selection(menu, 1);
+    if (menu->selected < previous) { /* wrapped round: the item above instead */
+      menu->selected = previous;
+      move_selection(menu, -1);
     }
   }
 }
 
-void menu_refresh(menu_t *m)
+void menu_reset(menu_t *menu)
 {
-  if (m->selected >= m->n_items)
-    m->selected = m->n_items ? m->n_items - 1 : 0;
-  if (m->n_items && !selectable(&m->items[m->selected])) {
-    int keep = m->selected;
-    move(m, 1);
-    if (m->selected < keep) /* wrapped round: the item above instead */
-      m->selected = keep, move(m, -1);
-  }
+  menu->n_items = 0;
+  menu->grouping = false;
 }
 
-void menu_reset(menu_t *m)
+static void enter(menu_t *menu)
 {
-  m->n_items = 0;
-  m->grouping = false;
-}
-
-static void enter(menu_t *m)
-{
-  menu_current = m;
-  if (m->n_items && !selectable(&m->items[m->selected]))
-    move(m, 1);
+  menu_current = menu;
+  if (menu->n_items && !selectable(&menu->items[menu->selected]))
+    move_selection(menu, 1);
 }
 
 menu_item_t *menu_editing;
 
-void menu_goto(menu_t *m)
+void menu_goto(menu_t *menu)
 {
   menu_editing = 0;
-  enter(m);
+  enter(menu);
 }
 
-void menu_edit(menu_item_t *it) { menu_editing = it; }
+void menu_edit(menu_item_t *item) { menu_editing = item; }
 
 void menu_open(menu_t *root)
 {
@@ -179,7 +207,8 @@ void menu_open(menu_t *root)
 void menu_close(void)
 {
   menu_editing = 0;
-  menu_last = menu_current && menu_current->parent ? menu_current : 0; /* the top level: start there */
+  /* reopen in the same submenu; from the top level, start at the root */
+  menu_last = menu_current && menu_current->parent ? menu_current : 0;
   menu_current = 0;
   input_block_game = false;
   gfx_clear();
@@ -197,30 +226,37 @@ void menu_back(void)
     menu_close();
 }
 
+/* --- changing and activating items ----------------------------------------------------------- */
+
+#define NUMBER_BIG_STEP 10 /* d-left/right with L held */
+
 /* gz's log: what a switch or checkbox is now, or the action taken (unless it logged something itself) */
-static void log_item(menu_item_t *it, uint32_t logged_before)
+static void log_item(menu_item_t *item, uint32_t log_count_before)
 {
-  if (gfx_log_count != logged_before || !it->label || !it->label[0] || (it->log_label && !it->log_label[0]))
+  bool logged_itself = gfx_log_count != log_count_before;
+  bool unnamed = !item->label || !item->label[0];
+  bool not_logged = item->log_label && !item->log_label[0];
+  if (logged_itself || unnamed || not_logged)
     return;
-  const char *name = T(it->log_label ? it->log_label : it->label);
-  char val[64] = "";
-  switch (it->kind) {
+  const char *name = T(item->log_label ? item->log_label : item->label);
+  char value[64] = "";
+  switch (item->kind) {
     case MI_CHECK:
-      gfx_logf("%s %s", name, T(it->get_check(it) ? "on" : "off"));
+      gfx_logf("%s %s", name, T(item->get_check(item) ? "on" : "off"));
       break;
     case MI_OPTION: {
-      int c = it->get_option(it);
-      if (c >= 0 && c < it->n_choices) {
-        if (it->choices)
-          snprintf(val, sizeof(val), "%s", T(it->choices[c]));
-        else if (it->choice_text)
-          it->choice_text(it, c, val, sizeof(val));
-        gfx_logf("%s: %s", name, val);
+      int choice = item->get_option(item);
+      if (choice >= 0 && choice < item->n_choices) {
+        if (item->choices)
+          snprintf(value, sizeof(value), "%s", T(item->choices[choice]));
+        else if (item->choice_text)
+          item->choice_text(item, choice, value, sizeof(value));
+        gfx_logf("%s: %s", name, value);
       }
       break;
     }
     case MI_ACTION:
-      if (it->action)
+      if (item->action)
         gfx_logf("%s", name);
       break;
     default:
@@ -228,56 +264,72 @@ static void log_item(menu_item_t *it, uint32_t logged_before)
   }
 }
 
-static void change_do(menu_item_t *it, int dir)
+/* A number moved by `step`. Single steps wrap round like gz's (when there's a maximum); big steps
+ * (L held) stop at the ends, and wrap only when already at one. */
+static int32_t stepped_number(int32_t value, int step, int32_t min, int32_t max, bool has_max)
 {
-  if (it->kind == MI_ACTION && it->on_change) {
-    it->on_change(it, dir);
-  } else if (it->kind == MI_OPTION && it->n_choices > 0) {
-    int c = it->get_option(it);
-    c = c < 0 ? 0 : (c + dir + it->n_choices) % it->n_choices;
-    it->set_option(it, c);
-  } else if (it->kind == MI_CHECK) {
-    it->set_check(it, dir > 0);
-  } else if (it->kind == MI_NUMBER) {
-    int32_t v = it->get_num(it), hi = it->num_max ? it->num_max(it) : INT32_MAX;
-    if (v == NUM_UNKNOWN)
+  if (step < -1) {
+    if (value == min && has_max)
+      return max;
+    return value + step < min ? min : value + step;
+  }
+  if (step > 1) {
+    if (has_max && value == max)
+      return min;
+    return has_max && value + step > max ? max : value + step;
+  }
+  value += step;
+  if (value < min)
+    return has_max ? max : min;
+  if (has_max && value > max)
+    return min;
+  return value;
+}
+
+/* d-left/right on an item (direction -1/+1, or +-NUMBER_BIG_STEP on a number) */
+static void change_value(menu_item_t *item, int direction)
+{
+  if (item->kind == MI_ACTION && item->on_change) {
+    item->on_change(item, direction);
+  } else if (item->kind == MI_OPTION && item->n_choices > 0) {
+    int choice = item->get_option(item);
+    if (choice < 0) /* unknown: start at the first */
+      choice = 0;
+    else
+      choice = (choice + direction + item->n_choices) % item->n_choices;
+    item->set_option(item, choice);
+  } else if (item->kind == MI_CHECK) {
+    item->set_check(item, direction > 0);
+  } else if (item->kind == MI_NUMBER) {
+    int32_t value = item->get_num(item);
+    int32_t max = item->num_max ? item->num_max(item) : INT32_MAX;
+    if (value == NUM_UNKNOWN)
       return;
-    bool has_hi = hi != NUM_UNKNOWN && hi != INT32_MAX;
-    if (dir > 1 || dir < -1) { /* by 10 (L held): stop at the ends, wrap only from an end */
-      if (dir < 0)
-        v = v == it->num_min && has_hi ? hi : (v + dir < it->num_min ? it->num_min : v + dir);
-      else
-        v = has_hi && v == hi ? it->num_min : (has_hi && v + dir > hi ? hi : v + dir);
-    } else {
-      v += dir;
-      if (v < it->num_min)
-        v = has_hi ? hi : it->num_min; /* wrap like gz */
-      else if (has_hi && v > hi)
-        v = it->num_min;
-    }
-    it->set_num(it, v);
+    bool has_max = max != NUM_UNKNOWN && max != INT32_MAX;
+    item->set_num(item, stepped_number(value, direction, item->num_min, max, has_max));
   }
 }
 
-static void activate_do(menu_item_t *it)
+/* L on an item */
+static void activate_item(menu_item_t *item)
 {
-  switch (it->kind) {
+  switch (item->kind) {
     case MI_SUBMENU:
-      enter(it->submenu);
+      enter(item->submenu);
       break;
     case MI_ACTION:
-      if (it->action)
-        it->action(it);
+      if (item->action)
+        item->action(item);
       break;
     case MI_CHECK:
-      it->set_check(it, !it->get_check(it));
+      item->set_check(item, !item->get_check(item));
       break;
     case MI_OPTION:
-      change_do(it, 1);
+      change_value(item, 1);
       break;
     case MI_NUMBER:
-      if (it->action)
-        it->action(it);
+      if (item->action)
+        item->action(item);
       break;
     case MI_BACK:
       menu_back();
@@ -288,411 +340,512 @@ static void activate_do(menu_item_t *it)
 }
 
 /* numbers aren't logged (scrolling would fill the log); the rest is, as gz logs its commands */
-static void change(menu_item_t *it, int dir)
+static void change(menu_item_t *item, int direction)
 {
-  uint32_t before = gfx_log_count;
-  change_do(it, dir);
-  if (it->kind != MI_NUMBER)
-    log_item(it, before);
+  uint32_t log_count_before = gfx_log_count;
+  change_value(item, direction);
+  if (item->kind != MI_NUMBER)
+    log_item(item, log_count_before);
 }
 
-static void activate(menu_item_t *it)
+static void activate(menu_item_t *item)
 {
-  uint32_t before = gfx_log_count;
-  activate_do(it);
-  log_item(it, before);
+  uint32_t log_count_before = gfx_log_count;
+  activate_item(item);
+  log_item(item, log_count_before);
+}
+
+/* --- input ----------------------------------------------------------------------------------- */
+
+/* Numbers: L held makes d-left/right go by NUMBER_BIG_STEP, so their own L (fill) happens when L is
+ * let go, and only if the d-pad wasn't used meanwhile. */
+static bool l_down_on_number, l_used_for_big_steps;
+
+/* L and d-left/right on a number; true if they used this frame's input */
+static bool number_input(menu_item_t *item)
+{
+  bool l_held = (input_held() & BTN_L) != 0;
+  if (input_pressed() & BTN_L) {
+    l_down_on_number = true;
+    l_used_for_big_steps = false;
+  }
+  if (l_held && (input_repeat(BTN_DLEFT) || input_repeat(BTN_DRIGHT))) {
+    l_used_for_big_steps = true;
+    change(item, input_repeat(BTN_DLEFT) ? -NUMBER_BIG_STEP : NUMBER_BIG_STEP);
+    return true;
+  }
+  if (!l_held && l_down_on_number) {
+    l_down_on_number = false;
+    if (!l_used_for_big_steps)
+      activate(item);
+    return true;
+  }
+  return (input_pressed() & BTN_L) != 0; /* just pressed: wait for it to be let go */
+}
+
+/* a page of text: the page moves, the cursor stays on return (menu_draw keeps the scroll in range) */
+static void scroll_text_input(menu_t *menu, menu_item_t *item)
+{
+  if (input_repeat(BTN_DUP))
+    menu->scroll--;
+  else if (input_repeat(BTN_DDOWN))
+    menu->scroll++;
+  else if (input_pressed() & BTN_L)
+    activate(item);
 }
 
 void menu_input(void)
 {
-  menu_t *m = menu_current;
-  if (!m || !m->n_items)
+  menu_t *menu = menu_current;
+  if (!menu || !menu->n_items)
     return;
-  menu_item_t *it = &m->items[m->selected];
+  menu_item_t *item = &menu->items[menu->selected];
   if (menu_editing) {
-    if (menu_editing != it || !it->edit || !it->edit(it))
+    if (menu_editing != item || !item->edit || !item->edit(item))
       menu_editing = 0;
     return;
   }
-  if (m->scroll_text) { /* the page moves, the cursor stays on return (menu_draw keeps it in range) */
-    if (input_repeat(BTN_DUP))
-      m->scroll--;
-    else if (input_repeat(BTN_DDOWN))
-      m->scroll++;
-    else if (input_pressed() & BTN_L)
-      activate(it);
+  if (menu->scroll_text) {
+    scroll_text_input(menu, item);
     return;
   }
-  bool parts = it->n_parts > 1;
-  /* numbers: L held makes d-left/right go by 10, so their L (fill) happens when L is let go,
-   * if the d-pad wasn't used meanwhile */
-  static bool l_on_number, l_used;
-  bool l_held = (input_held() & BTN_L) != 0;
-  if (it->kind == MI_NUMBER) {
-    if (input_pressed() & BTN_L)
-      l_on_number = true, l_used = false;
-    if (l_held && (input_repeat(BTN_DLEFT) || input_repeat(BTN_DRIGHT))) {
-      l_used = true;
-      change(it, input_repeat(BTN_DLEFT) ? -10 : 10);
-      return;
-    }
-    if (!l_held && l_on_number) {
-      l_on_number = false;
-      if (!l_used)
-        activate(it);
-      return;
-    }
-    if (input_pressed() & BTN_L)
+  if (item->kind == MI_NUMBER) {
+    if (number_input(item))
       return;
   } else {
-    l_on_number = false;
+    l_down_on_number = false;
   }
+  bool has_parts = item->n_parts > 1;
   if (input_repeat(BTN_DUP)) {
-    if (!it->on_move || !it->on_move(it, -1))
-      move(m, -1);
+    if (!item->on_move || !item->on_move(item, -1))
+      move_selection(menu, -1);
   } else if (input_repeat(BTN_DDOWN)) {
-    if (!it->on_move || !it->on_move(it, 1))
-      move(m, 1);
-  } else if (parts && input_repeat(BTN_DLEFT))
-    it->part = it->part > 0 ? it->part - 1 : 0;
-  else if (parts && input_repeat(BTN_DRIGHT))
-    it->part = it->part < it->n_parts - 1 ? it->part + 1 : it->n_parts - 1;
-  else if (input_repeat(BTN_DLEFT))
-    change(it, -1);
-  else if (input_repeat(BTN_DRIGHT))
-    change(it, 1);
-  else if (it->press && ((input_pressed() & BTN_L) || (it->press_repeat && input_repeat(BTN_L))))
-    it->press(it, it->part < it->n_parts ? it->part : 0);
-  else if (input_pressed() & BTN_L)
-    activate(it);
+    if (!item->on_move || !item->on_move(item, 1))
+      move_selection(menu, 1);
+  } else if (has_parts && input_repeat(BTN_DLEFT)) {
+    item->part = item->part > 0 ? item->part - 1 : 0;
+  } else if (has_parts && input_repeat(BTN_DRIGHT)) {
+    item->part = item->part < item->n_parts - 1 ? item->part + 1 : item->n_parts - 1;
+  } else if (input_repeat(BTN_DLEFT)) {
+    change(item, -1);
+  } else if (input_repeat(BTN_DRIGHT)) {
+    change(item, 1);
+  } else if (item->press && ((input_pressed() & BTN_L) || (item->press_repeat && input_repeat(BTN_L)))) {
+    item->press(item, item->part < item->n_parts ? item->part : 0);
+  } else if (input_pressed() & BTN_L) {
+    activate(item);
+  }
 }
 
-static void item_line(menu_item_t *it, char *buf, int len);
+/* --- an item's line -------------------------------------------------------------------------- */
 
-void menu_item_line(menu_item_t *it, char *buf, int len)
+static void item_line(menu_item_t *item, char *buf, int len);
+
+void menu_item_line(menu_item_t *item, char *buf, int len)
 {
-  if (!it->icon) {
-    item_line(it, buf, len);
+  if (!item->icon) {
+    item_line(item, buf, len);
     return;
   }
-  bool wide = it->icon == GFX_ICON_FOLDER;
+  bool wide_icon = item->icon == GFX_ICON_FOLDER; /* two cells: followed by GFX_WIDE_REST ("\x03") */
   char rest[96];
-  item_line(it, rest, sizeof(rest));
-  snprintf(buf, len, "%c%s %s", it->icon, wide ? "\x03" : "", rest);
+  item_line(item, rest, sizeof(rest));
+  snprintf(buf, len, "%c%s %s", item->icon, wide_icon ? "\x03" : "", rest);
 }
 
-static void item_line(menu_item_t *it, char *buf, int len)
+static void item_line(menu_item_t *item, char *buf, int len)
 {
-  char val[96] = "";
-  switch (it->kind) {
+  char value[96] = "";
+  switch (item->kind) {
     case MI_SUBMENU:
-      snprintf(buf, len, "%s >", T(it->label));
+      snprintf(buf, len, "%s >", T(item->label));
       return;
     case MI_CHECK: {
-      char box[3] = { it->get_check(it) ? GFX_CHECK_ON : GFX_CHECK_OFF, GFX_WIDE_REST, 0 };
-      if (it->text) {
-        it->text(it, val, sizeof(val));
-        snprintf(buf, len, "%s%-13s %s", box, T(it->label), val);
+      char box[3] = { item->get_check(item) ? GFX_CHECK_ON : GFX_CHECK_OFF, GFX_WIDE_REST, 0 };
+      if (item->text) {
+        item->text(item, value, sizeof(value));
+        snprintf(buf, len, "%s%-13s %s", box, T(item->label), value);
       } else {
-        snprintf(buf, len, "%s%s", box, T(it->label));
+        snprintf(buf, len, "%s%s", box, T(item->label));
       }
       return;
     }
     case MI_OPTION: {
-      int c = it->get_option(it);
-      if (c < 0 || c >= it->n_choices)
-        snprintf(val, sizeof(val), "-");
-      else if (it->choices)
-        snprintf(val, sizeof(val), "%s", T(it->choices[c]));
-      else if (it->choice_text)
-        it->choice_text(it, c, val, sizeof(val));
-      snprintf(buf, len, "%s  < %s >", T(it->label), val);
+      int choice = item->get_option(item);
+      if (choice < 0 || choice >= item->n_choices)
+        snprintf(value, sizeof(value), "-");
+      else if (item->choices)
+        snprintf(value, sizeof(value), "%s", T(item->choices[choice]));
+      else if (item->choice_text)
+        item->choice_text(item, choice, value, sizeof(value));
+      snprintf(buf, len, "%s  < %s >", T(item->label), value);
       return;
     }
     case MI_NUMBER: {
-      int32_t v = it->get_num(it);
-      if (v == NUM_UNKNOWN)
-        snprintf(val, sizeof(val), "-");
-      else if (it->text)
-        it->text(it, val, sizeof(val));
+      int32_t number = item->get_num(item);
+      if (number == NUM_UNKNOWN)
+        snprintf(value, sizeof(value), "-");
+      else if (item->text)
+        item->text(item, value, sizeof(value));
       else
-        snprintf(val, sizeof(val), "%d", (int)v);
-      int32_t hi = it->num_max ? it->num_max(it) : NUM_UNKNOWN;
-      if (it->num_max && hi != NUM_UNKNOWN && v != NUM_UNKNOWN && !it->text)
-        snprintf(buf, len, "%s  < %s > / %d", T(it->label), val, (int)hi);
+        snprintf(value, sizeof(value), "%d", (int)number);
+      int32_t max = item->num_max ? item->num_max(item) : NUM_UNKNOWN;
+      /* "/ max" only for a plain number whose maximum is known */
+      if (item->num_max && max != NUM_UNKNOWN && number != NUM_UNKNOWN && !item->text)
+        snprintf(buf, len, "%s  < %s > / %d", T(item->label), value, (int)max);
       else
-        snprintf(buf, len, "%s  < %s >", T(it->label), val);
+        snprintf(buf, len, "%s  < %s >", T(item->label), value);
       return;
     }
     case MI_TEXT:
-      it->text(it, buf, len);
+      item->text(item, buf, len);
       return;
     default:
-      if (it->text && !it->label[0]) /* the text is the whole line */
-        it->text(it, buf, len);
-      else if (it->text) {
-        it->text(it, val, sizeof(val));
-        snprintf(buf, len, "%s  %s", T(it->label), val);
+      if (item->text && !item->label[0]) { /* the text is the whole line */
+        item->text(item, buf, len);
+      } else if (item->text) {
+        item->text(item, value, sizeof(value));
+        snprintf(buf, len, "%s  %s", T(item->label), value);
       } else {
-        snprintf(buf, len, "%s", T(it->label));
+        snprintf(buf, len, "%s", T(item->label));
       }
       return;
   }
 }
 
-/* What the selected item's controls do: its own hint, or one for its kind. */
-static const char *hint_raw(const menu_item_t *it);
-static const char *hint_of(const menu_item_t *it) { return T(hint_raw(it)); }
-static const char *hint_raw(const menu_item_t *it)
+/* --- hints ----------------------------------------------------------------------------------- */
+
+/* What the selected item's controls do (in English): its own hint, or one for its kind. */
+static const char *item_hint_english(const menu_item_t *item)
 {
-  if (it->part_hints && it->n_parts > 1 && it->part < it->n_parts && it->part_hints[it->part])
-    return it->part_hints[it->part];
-  if (it->hint)
-    return it->hint[0] ? it->hint : 0;
-  switch (it->kind) {
-    case MI_NUMBER: return it->action ? "d-left/right: change (L held: by 10)   L: fill"
-                                      : "d-left/right: change (L held: by 10)";
+  if (item->part_hints && item->n_parts > 1 && item->part < item->n_parts && item->part_hints[item->part])
+    return item->part_hints[item->part];
+  if (item->hint)
+    return item->hint[0] ? item->hint : 0; /* "": no hint */
+  switch (item->kind) {
+    case MI_NUMBER: return item->action ? "d-left/right: change (L held: by 10)   L: fill"
+                                        : "d-left/right: change (L held: by 10)";
     case MI_OPTION: return "d-left/right or L: change";
     default: return 0;
   }
 }
+
+static const char *item_hint(const menu_item_t *item) { return T(item_hint_english(item)); }
+
+/* --- drawing --------------------------------------------------------------------------------- */
 
 /* items (and the hint) start here: column 0 has the ^ / v scroll marks, then a blank column */
 #define ITEM_COL 2
 #define HINT_MIN_W 36 /* hints wrap at the panel's width, but at least this wide */
 #define HINT_MAX_ROWS 4
 #define TITLE_MAX_ROWS 3
+#define LINE_BUF (GFX_COLS * 2)
+#define MIN_SCROLL_ROWS 3    /* the scrolling part of the list always gets at least this many rows */
+#define MAX_PART_HINTS 8     /* the panel's size allows for the hints of at most this many parts */
+#define WRAP_MIN_W 8         /* a wrapped line is never narrower than this, however deep its indent */
+#define MAX_MENU_DEPTH 16
+#define CRUMB_SEPARATOR_W 3  /* " > " between two menus */
+#define CRUMB_LINE_END_W 2   /* " >" ending a broken breadcrumb line */
+#define FILLER_CHAR 0x7F     /* drawn as nothing, but counts as content: it holds the panel's size */
 
-/* The breadcrumb of m in up to TITLE_MAX_ROWS lines of at most w columns: menus joined by " > ", a line
- * broken after a " >" with the next indented 2. Too many lines: the start is dropped for "... >". */
-static int crumb_lines(const menu_t *m, int w, char out[][GFX_COLS + 1])
+static int max_int(int a, int b) { return a > b ? a : b; }
+
+/* The breadcrumb of the menu in up to TITLE_MAX_ROWS lines of at most `width` columns: menus joined by
+ * " > ", a line broken after a " >" with the next indented 2. Too many lines: the start is dropped for
+ * "... >". Returns the number of lines. */
+static int crumb_lines(const menu_t *menu, int width, char out[][GFX_COLS + 1])
 {
-  const menu_t *path[16];
+  const menu_t *path[MAX_MENU_DEPTH]; /* path[0] is this menu, path[depth - 1] the root */
   int depth = 0;
-  for (const menu_t *p = m; p && depth < 16; p = p->parent)
-    path[depth++] = p;
-  for (int first = depth - 1; first >= 0; first--) { /* from the whole path; then without its start */
-    int n = 0, len = 0;
+  for (const menu_t *m = menu; m && depth < MAX_MENU_DEPTH; m = m->parent)
+    path[depth++] = m;
+  /* try the whole path first; then without its first name, and so on */
+  for (int first = depth - 1; first >= 0; first--) {
+    int row = 0;
+    int len = 0;
     bool fits = true;
     out[0][0] = 0;
     if (first != depth - 1)
       len = snprintf(out[0], GFX_COLS + 1, "...");
-    for (int i = first; i >= 0 && fits; i--) {
-      const char *t = T(path[i]->title);
-      int tl = (int)strlen(t);
-      bool lead = i == first && first == depth - 1; /* the very first name: nothing before it */
-      if (!lead && len + 3 + tl > w) { /* " > name" doesn't fit: end this line with " >" */
-        if (len + 2 > w || n + 1 >= TITLE_MAX_ROWS) {
+    for (int i = first; i >= 0; i--) {
+      const char *title = T(path[i]->title);
+      int title_len = (int)strlen(title);
+      bool line_start = i == first && first == depth - 1; /* the very first name: nothing before it */
+      if (!line_start && len + CRUMB_SEPARATOR_W + title_len > width) {
+        /* " > name" doesn't fit: end this line with " >" and go on on the next */
+        if (len + CRUMB_LINE_END_W > width || row + 1 >= TITLE_MAX_ROWS) {
           fits = false;
           break;
         }
-        snprintf(out[n] + len, GFX_COLS + 1 - len, " >");
-        n++;
-        len = snprintf(out[n], GFX_COLS + 1, "  ");
-        lead = true;
+        snprintf(out[row] + len, GFX_COLS + 1 - len, " >");
+        row++;
+        len = snprintf(out[row], GFX_COLS + 1, "  ");
+        line_start = true;
       }
-      if (len + (lead ? 0 : 3) + tl > w) { /* one name wider than the line: cut it */
-        tl = w - len - (lead ? 0 : 3);
-        if (tl < 1) {
+      int separator_w = line_start ? 0 : CRUMB_SEPARATOR_W;
+      if (len + separator_w + title_len > width) { /* one name wider than the line: cut it */
+        title_len = width - len - separator_w;
+        if (title_len < 1) {
           fits = false;
           break;
         }
       }
-      len += snprintf(out[n] + len, GFX_COLS + 1 - len, "%s%.*s", lead ? "" : " > ", tl, t);
+      len += snprintf(out[row] + len, GFX_COLS + 1 - len, "%s%.*s", line_start ? "" : " > ", title_len, title);
     }
     if (fits)
-      return n + 1;
+      return row + 1;
   }
-  snprintf(out[0], GFX_COLS + 1, "%.*s", w, T(m->title)); /* (can't happen: the last try is one name) */
+  snprintf(out[0], GFX_COLS + 1, "%.*s", width, T(menu->title)); /* (can't happen: the last try is one name) */
   return 1;
 }
 
-/* Word-wraps s (lines split at '\n' too) to w columns into out; a wrapped line keeps the indent its
- * line started with. Returns the lines (at least 1); *longest: the longest one. */
-static int wrap_text(const char *s, int w, char out[][GFX_COLS + 1], int max, int *longest)
+/* Word-wraps text (lines split at '\n' too) to `width` columns into out; a wrapped line keeps the
+ * indent its line started with. Returns the lines (at least 1); *longest (if wanted): the longest. */
+static int wrap_text(const char *text, int width, char out[][GFX_COLS + 1], int max_lines, int *longest)
 {
-  int n = 0;
+  int n_lines = 0;
   if (longest)
     *longest = 0;
-  if (!s)
-    s = "";
-  while (n < max) {
-    const char *e = s;
-    while (*e && *e != '\n')
-      e++;
-    int lead = 0;
-    while (s + lead < e && s[lead] == ' ')
-      lead++;
-    const char *p = s;
-    bool first = true;
+  if (!text)
+    text = "";
+  while (n_lines < max_lines) {
+    const char *line_end = text;
+    while (*line_end && *line_end != '\n')
+      line_end++;
+    int indent = 0;
+    while (text + indent < line_end && text[indent] == ' ')
+      indent++;
+    const char *p = text;
+    bool first_piece = true;
     do {
-      int ind = first ? 0 : lead;
-      if (!first)
-        while (p < e && *p == ' ')
+      int pad = first_piece ? 0 : indent; /* the first piece has its own indent in it */
+      if (!first_piece)
+        while (p < line_end && *p == ' ')
           p++;
-      int room = w - ind < 8 ? 8 : w - ind;
-      const char *brk = e - p > room ? p + room : e;
-      if (brk < e) { /* back to the last space, if there's one */
-        const char *b = brk;
-        while (b > p + (first ? lead : 0) && *b != ' ')
-          b--;
-        if (b > p + (first ? lead : 0))
-          brk = b;
+      int room = width - pad < WRAP_MIN_W ? WRAP_MIN_W : width - pad;
+      const char *piece_end = line_end - p > room ? p + room : line_end;
+      if (piece_end < line_end) { /* back to the last space, if there's one (not in the indent) */
+        const char *earliest = p + (first_piece ? indent : 0);
+        const char *space = piece_end;
+        while (space > earliest && *space != ' ')
+          space--;
+        if (space > earliest)
+          piece_end = space;
       }
-      int len = (int)(brk - p);
-      snprintf(out[n], GFX_COLS + 1, "%*s%.*s", ind, "", len, p);
-      int l = ind + len;
-      if (longest && l > *longest)
-        *longest = l;
-      n++, p = brk, first = false;
-    } while (p < e && n < max);
-    if (!*e)
+      int piece_len = (int)(piece_end - p);
+      snprintf(out[n_lines], GFX_COLS + 1, "%*s%.*s", pad, "", piece_len, p);
+      if (longest && pad + piece_len > *longest)
+        *longest = pad + piece_len;
+      n_lines++;
+      p = piece_end;
+      first_piece = false;
+    } while (p < line_end && n_lines < max_lines);
+    if (!*line_end)
       break;
-    s = e + 1;
+    text = line_end + 1;
   }
-  return n ? n : 1;
+  return n_lines ? n_lines : 1;
+}
+
+static char hint_lines[HINT_MAX_ROWS][GFX_COLS + 1];
+
+static const char *current_hint(const menu_t *menu)
+{
+  const char *hint = menu->n_items ? item_hint(&menu->items[menu->selected]) : 0;
+  if (menu_editing && menu_editing->edit_hint)
+    hint = T(menu_editing->edit_hint);
+  if (menu->scroll_text)
+    hint = T("d-up/down: scroll   L: return");
+  return hint;
+}
+
+/* the widest item line, from column 0 */
+static int items_width(menu_t *menu)
+{
+  char line[LINE_BUF];
+  int width = 0;
+  for (int i = 0; i < menu->n_items; i++) {
+    menu_item_line(&menu->items[i], line, sizeof(line));
+    width = max_int(width, ITEM_COL + menu->items[i].indent * MENU_INDENT + (int)strlen(line));
+  }
+  return width;
+}
+
+static void measure_hint(const char *hint, int wrap_w, int *rows, int *width)
+{
+  if (!hint)
+    return;
+  int longest;
+  int hint_rows = wrap_text(hint, wrap_w, hint_lines, HINT_MAX_ROWS, &longest);
+  *rows = max_int(*rows, hint_rows);
+  *width = max_int(*width, longest);
+}
+
+/* The rows and width of the biggest hint any item of the menu can show, so the panel keeps one size
+ * while in the menu. */
+static void measure_hints(const menu_t *menu, const char *current, int wrap_w, int *rows, int *width)
+{
+  *rows = 1;
+  *width = 0;
+  for (int i = 0; i < menu->n_items; i++) {
+    const menu_item_t *item = &menu->items[i];
+    measure_hint(item_hint(item), wrap_w, rows, width);
+    measure_hint(T(item->edit_hint), wrap_w, rows, width);
+    for (int k = 0; item->part_hints && k < item->n_parts && k < MAX_PART_HINTS; k++)
+      measure_hint(T(item->part_hints[k]), wrap_w, rows, width);
+  }
+  measure_hint(current, wrap_w, rows, width);
+}
+
+/* Keeps the selection in view in the scrolling rows (those under the pinned ones). */
+static void update_scroll(menu_t *menu, int pinned, int visible)
+{
+  /* headings and text just above the cursor come into view with it (they can't be selected, so
+   * the cursor alone would never scroll back to a heading at the top) */
+  int top = menu->selected;
+  while (top > pinned && !selectable(&menu->items[top - 1]) && menu->selected - (top - 1) < visible)
+    top--;
+  /* and the same below it: the read-only lines under a menu's return */
+  int bottom = menu->selected;
+  while (bottom + 1 < menu->n_items && !selectable(&menu->items[bottom + 1]) && bottom + 1 - top < visible)
+    bottom++;
+  if (menu->scroll_text) /* scrolled by the d-pad: only kept in range */
+    menu->scroll = menu->scroll < 0 ? 0 : menu->scroll;
+  else if (top < menu->scroll)
+    menu->scroll = top;
+  else if (bottom >= menu->scroll + visible)
+    menu->scroll = bottom - visible + 1;
+  if (menu->scroll > menu->n_items - visible)
+    menu->scroll = menu->n_items - visible > 0 ? menu->n_items - visible : 0;
+  if (menu->scroll < pinned)
+    menu->scroll = pinned;
+}
+
+/* gz: a button icon in the highlight colour, and the "< ... >" switch in its line (if any) */
+static void draw_icon_button(char *line, int col, int y)
+{
+  char icon[2] = { line[0], 0 };
+  gfx_text(col, y, GFX_NORMAL, line);
+  gfx_text(col, y, GFX_SELECTED, icon);
+  char *open = line; /* (strchr isn't imported) */
+  while (*open && *open != '<')
+    open++;
+  char *close = open;
+  while (*close && *close != '>')
+    close++;
+  if (*open && *close) {
+    close[1] = 0;
+    gfx_text(col + (int)(open - line), y, GFX_SELECTED, open);
+  }
+}
+
+static void draw_item(menu_t *menu, int index, int y)
+{
+  menu_item_t *item = &menu->items[index];
+  char line[LINE_BUF];
+  menu_item_line(item, line, sizeof(line));
+  bool selected = index == menu->selected;
+  int col = ITEM_COL + item->indent * MENU_INDENT;
+  int cursor_start = 0;
+  int cursor_len = 0;
+  if (selected && item->cursor && item->cursor(item, line, &cursor_start, &cursor_len)) {
+    /* only part of the line shows the cursor */
+    int line_len = (int)strlen(line);
+    gfx_text(col, y, GFX_NORMAL, line);
+    if (cursor_start >= 0 && cursor_start < line_len) {
+      if (cursor_start + cursor_len < line_len)
+        line[cursor_start + cursor_len] = 0;
+      gfx_text(col + cursor_start, y, GFX_SELECTED, line + cursor_start);
+    }
+  } else if (selected && item->icon_select) {
+    draw_icon_button(line, col, y);
+  } else {
+    gfx_style_t style = GFX_NORMAL;
+    if (selected)
+      style = GFX_SELECTED;
+    else if (item->kind == MI_TEXT && !item->plain)
+      style = GFX_DIM;
+    gfx_text(col, y, style, line);
+  }
 }
 
 void menu_draw(void)
 {
-  menu_t *m = menu_current;
-  if (!m)
+  menu_t *menu = menu_current;
+  if (!menu)
     return;
-  /* item rows that fit on screen (title and a blank line above them; a blank and the hint below) */
-  const char *hint = m->n_items ? hint_of(&m->items[m->selected]) : 0;
-  if (menu_editing && menu_editing->edit_hint)
-    hint = T(menu_editing->edit_hint);
-  if (m->scroll_text)
-    hint = T("d-up/down: scroll   L: return");
+  const char *hint = current_hint(menu);
   if (menu_editing && menu_editing->edit_alone) { /* out of the way of what's being moved */
     gfx_begin();
-    gfx_text(0, 0, GFX_TITLE, T(m->title));
+    gfx_text(0, 0, GFX_TITLE, T(menu->title));
     gfx_text(ITEM_COL, 2, GFX_DIM, hint ? hint : "");
     gfx_end();
     return;
   }
   /* the items' width; hints wrap to it (at least HINT_MIN_W), and take as many rows as this menu's
    * longest hint, so the panel keeps one size while in the menu */
-  char line[GFX_COLS * 2];
-  int items_w = 0;
-  for (int i = 0; i < m->n_items; i++) {
-    menu_item_line(&m->items[i], line, sizeof(line));
-    int lw = ITEM_COL + m->items[i].indent * MENU_INDENT + (int)strlen(line);
-    items_w = lw > items_w ? lw : items_w;
-  }
+  int items_w = items_width(menu);
   int wrap_w = items_w - ITEM_COL < HINT_MIN_W ? HINT_MIN_W : items_w - ITEM_COL;
   if (wrap_w > GFX_COLS - ITEM_COL)
     wrap_w = GFX_COLS - ITEM_COL;
-  static char hl[HINT_MAX_ROWS][GFX_COLS + 1];
-  int hint_rows = 1, hint_w = 0, l;
-  for (int i = 0; i <= m->n_items; i++) {
-    const char *hs[2 + 8] = { 0 };
-    int nh = 0;
-    if (i == m->n_items)
-      hs[nh++] = hint;
-    else {
-      hs[nh++] = hint_of(&m->items[i]), hs[nh++] = T(m->items[i].edit_hint);
-      for (int k = 0; m->items[i].part_hints && k < m->items[i].n_parts && nh < 10; k++)
-        hs[nh++] = T(m->items[i].part_hints[k]);
-    }
-    for (int k = 0; k < nh; k++) {
-      if (!hs[k])
-        continue;
-      int r = wrap_text(hs[k], wrap_w, hl, HINT_MAX_ROWS, &l);
-      hint_rows = r > hint_rows ? r : hint_rows;
-      hint_w = l > hint_w ? l : hint_w;
-    }
-  }
+  int hint_rows;
+  int hint_w;
+  measure_hints(menu, hint, wrap_w, &hint_rows, &hint_w);
+
   /* breadcrumb: root > ... > this menu, wrapped after a " >" to the panel's width (continuation lines
    * indented); a path longer than TITLE_MAX_ROWS keeps its end */
-  int title_w = items_w > ITEM_COL + hint_w ? items_w : ITEM_COL + hint_w;
-  title_w = title_w < ITEM_COL + HINT_MIN_W ? ITEM_COL + HINT_MIN_W : title_w > GFX_COLS ? GFX_COLS : title_w;
-  static char tl[TITLE_MAX_ROWS][GFX_COLS + 1];
-  int title_rows = crumb_lines(m, title_w, tl), title_len = 0;
+  int title_w = max_int(items_w, ITEM_COL + hint_w);
+  if (title_w < ITEM_COL + HINT_MIN_W)
+    title_w = ITEM_COL + HINT_MIN_W;
+  else if (title_w > GFX_COLS)
+    title_w = GFX_COLS;
+  static char title_lines[TITLE_MAX_ROWS][GFX_COLS + 1];
+  int title_rows = crumb_lines(menu, title_w, title_lines);
+  int title_len = 0;
   for (int k = 0; k < title_rows; k++)
-    title_len = (int)strlen(tl[k]) > title_len ? (int)strlen(tl[k]) : title_len;
-  int y0 = title_rows + 1; /* the first item's row: the title, then a blank line */
-  int visible = gfx_menu_rows - y0 - 1 - hint_rows; /* always room for the hint, so the list doesn't jump */
-  if (visible < 3)
-    visible = 3;
+    title_len = max_int(title_len, (int)strlen(title_lines[k]));
+
+  /* item rows that fit on screen: the title and a blank line above them; a blank and the hint below
+   * (always room for the hint, so the list doesn't jump) */
+  int first_item_y = title_rows + 1;
+  int visible = gfx_menu_rows - first_item_y - 1 - hint_rows;
+  if (visible < MIN_SCROLL_ROWS)
+    visible = MIN_SCROLL_ROWS;
   /* the first `pinned` items stay at the top; the rest scroll under them in `visible` rows */
-  int pin = m->pinned > 0 && m->pinned < m->n_items && visible - m->pinned >= 3 ? m->pinned : 0;
-  visible -= pin;
-  /* headings and text just above the cursor come into view with it (they can't be selected, so
-   * the cursor alone would never scroll back to a heading at the top) */
-  int top = m->selected;
-  while (top > pin && !selectable(&m->items[top - 1]) && m->selected - (top - 1) < visible)
-    top--;
-  /* and the same below it: the read-only lines under a menu's return */
-  int bottom = m->selected;
-  while (bottom + 1 < m->n_items && !selectable(&m->items[bottom + 1]) && bottom + 1 - top < visible)
-    bottom++;
-  if (m->scroll_text) /* scrolled by the d-pad: only kept in range */
-    m->scroll = m->scroll < 0 ? 0 : m->scroll;
-  else if (top < m->scroll)
-    m->scroll = top;
-  else if (bottom >= m->scroll + visible)
-    m->scroll = bottom - visible + 1;
-  if (m->scroll > m->n_items - visible)
-    m->scroll = m->n_items - visible > 0 ? m->n_items - visible : 0;
-  if (m->scroll < pin)
-    m->scroll = pin;
+  int pinned = 0;
+  if (menu->pinned > 0 && menu->pinned < menu->n_items && visible - menu->pinned >= MIN_SCROLL_ROWS)
+    pinned = menu->pinned;
+  visible -= pinned;
+  update_scroll(menu, pinned, visible);
+
   gfx_begin();
   for (int k = 0; k < title_rows; k++)
-    gfx_text(0, k, GFX_TITLE, tl[k]);
-  for (int r = 0; r < pin + visible; r++) { /* r: the display row; pinned items first */
-    int i = r < pin ? r : m->scroll + r - pin;
-    if (i >= m->n_items)
+    gfx_text(0, k, GFX_TITLE, title_lines[k]);
+  for (int row = 0; row < pinned + visible; row++) {
+    int index = row < pinned ? row : menu->scroll + row - pinned;
+    if (index >= menu->n_items)
       break;
-    menu_item_line(&m->items[i], line, sizeof(line));
-    gfx_style_t st = i == m->selected                                ? GFX_SELECTED
-                     : m->items[i].kind == MI_TEXT && !m->items[i].plain ? GFX_DIM
-                                                                        : GFX_NORMAL;
-    int col = ITEM_COL + m->items[i].indent * MENU_INDENT, cs = 0, cl = 0;
-    if (i == m->selected && m->items[i].cursor && m->items[i].cursor(&m->items[i], line, &cs, &cl)) {
-      int l = (int)strlen(line);
-      gfx_text(col, y0 + r, GFX_NORMAL, line);
-      if (cs >= 0 && cs < l) {
-        if (cs + cl < l)
-          line[cs + cl] = 0;
-        gfx_text(col + cs, y0 + r, GFX_SELECTED, line + cs);
-      }
-    } else if (i == m->selected && m->items[i].icon_select) { /* gz: a button icon in the highlight colour */
-      char icon[2] = { line[0], 0 };
-      gfx_text(col, y0 + r, GFX_NORMAL, line);
-      gfx_text(col, y0 + r, GFX_SELECTED, icon);
-      char *lt = line, *gt; /* and its switch (strchr isn't imported) */
-      while (*lt && *lt != '<')
-        lt++;
-      for (gt = lt; *gt && *gt != '>'; gt++)
-        ;
-      if (*lt && *gt) {
-        gt[1] = 0;
-        gfx_text(col + (int)(lt - line), y0 + r, GFX_SELECTED, lt);
-      }
-    } else {
-      gfx_text(col, y0 + r, st, line);
-    }
+    draw_item(menu, index, first_item_y + row);
   }
-  if (m->scroll > pin)
-    gfx_text(0, y0 + pin, GFX_DIM, "^");
-  if (m->scroll + visible < m->n_items)
-    gfx_text(0, y0 + pin + visible - 1, GFX_DIM, "v");
+  if (menu->scroll > pinned)
+    gfx_text(0, first_item_y + pinned, GFX_DIM, "^");
+  if (menu->scroll + visible < menu->n_items)
+    gfx_text(0, first_item_y + pinned + visible - 1, GFX_DIM, "v");
+
   /* The panel keeps one size while in this menu (a size change redraws it, which flashes): the hint
-   * row is always there, and the width is the widest line or hint of any item, not just the visible
-   * ones. FILL is drawn as nothing but counts as content. */
-  static const char fill[2] = { 0x7F, 0 };
-  int n_shown = pin + (m->n_items - m->scroll < visible ? m->n_items - m->scroll : visible);
-  int nh = wrap_text(hint, wrap_w, hl, HINT_MAX_ROWS, 0);
-  for (int k = 0; k < nh; k++)
-    gfx_text(ITEM_COL, y0 + n_shown + 1 + k, GFX_DIM, hl[k][0] ? hl[k] : fill);
-  if (nh < hint_rows) /* the rows the longest hint takes stay the panel's */
-    gfx_text(ITEM_COL, y0 + n_shown + hint_rows, GFX_DIM, fill);
-  int width = title_len;
-  width = items_w > width ? items_w : width;
-  width = ITEM_COL + hint_w > width ? ITEM_COL + hint_w : width;
+   * rows are always there, and the width is the widest line or hint of any item, not just the
+   * visible ones. */
+  static const char filler[2] = { FILLER_CHAR, 0 };
+  int scrolled_shown = menu->n_items - menu->scroll < visible ? menu->n_items - menu->scroll : visible;
+  int hint_y = first_item_y + pinned + scrolled_shown + 1;
+  int n_hint_lines = wrap_text(hint, wrap_w, hint_lines, HINT_MAX_ROWS, 0);
+  for (int k = 0; k < n_hint_lines; k++)
+    gfx_text(ITEM_COL, hint_y + k, GFX_DIM, hint_lines[k][0] ? hint_lines[k] : filler);
+  if (n_hint_lines < hint_rows) /* the rows the longest hint takes stay the panel's */
+    gfx_text(ITEM_COL, hint_y + hint_rows - 1, GFX_DIM, filler);
+  int width = max_int(title_len, max_int(items_w, ITEM_COL + hint_w));
   if (width > GFX_COLS)
     width = GFX_COLS;
-  gfx_text(width - 1, y0 - 1, GFX_DIM, fill);
+  gfx_text(width - 1, first_item_y - 1, GFX_DIM, filler);
   gfx_end();
 }

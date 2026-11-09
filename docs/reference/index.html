@@ -28,7 +28,10 @@ fields with 32-bit keys plus 11,657 <code>Bool64bitKey</code> flags. Browse them
 <h3>In memory</h3>
 <p>GameData keeps a type list of <code>(type vtable, count, objects, hash table)</code> entries. Objects of one type
 are a fixed size apart (Int and Float 0x28, Enum 0x38, Bool 0x18). The current value sits at <b>+0x1C with a
-copy at +0x20</b> (Bool: +0x16 and +0x17); write both. The hash table maps field hash &rarr; object index.</p>
+copy at +0x20</b> (Bool: +0x16 and +0x17); write both. The hash table maps field hash &rarr; object index.
+Every object also says whether it is saved: a save file index at +0x10 (-1 not saved, 0 the save slot) and reset
+bits at +0x08 (bit 0: cleared on an area change, inferred). About 9,870 of the 11,292 Bools are saved and kept
+across areas; the <a href="fields.html">save fields</a> page shows both and can list only those.</p>
 <h3>Save files</h3>
 <p><code>%APPDATA%\eden\nand\user\save\0000000000000000\&lt;user&gt;\0400486024DEC000\slot_NN\progress.sav</code>.
 From offset 0x20 it is a table of <code>(hash u32, value u32)</code> pairs; for String64 fields the value is the
@@ -38,7 +41,8 @@ file offset of a 64-byte text slot. There is no checksum.</p>
 <p>The game stores hashes, not names. Names were recovered by hashing every string found in the game's
 scripts and data (event flows, logic, sequences, UI) and matching against the field list: about 4,600 real names
 such as <code>Get_StoneOfForest_IsCompleted_Exp</code> or <code>PouchData.Item_Ocarina_Fairy.StockNum</code>.
-Another ~3,600 fields have readable titles from the onif save editor, matched by exporting its demo save with
+A further 2,568 names come from strings in the game's memory while it runs (<code>data/memory_names.json</code>),
+so about 7,160 of the ~15,000 fields are named. Another ~3,600 fields have readable titles from the onif save editor, matched by exporting its demo save with
 known changes and diffing the result.</p>
 <p>Useful name patterns:</p>
 <ul>

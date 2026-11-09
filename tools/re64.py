@@ -14,107 +14,132 @@ import numpy as np
 D = Path(sys.argv[1])
 BIN = (D / "main.bin").read_bytes()
 TEXT_END = 0x3C80000  # code ends before rodata (first strings ~0x3c8xxxx)
-W = np.frombuffer(BIN[:TEXT_END], dtype="<u4")
-NAMES = {}
-for p in (Path(__file__).resolve().parents[1] / "data" / "rom_names.json",):
-    if p.exists():
-        NAMES = {int(h, 16): s for h, (s, t) in json.loads(p.read_text()).items()}
+W = np.frombuffer(BIN[:TEXT_END], dtype="<u4")  # the code as 32-bit instruction words
+NAMES = {}  # MurmurHash3 -> save field name, for naming constants in disassembly
+DATA_DIR = Path(__file__).resolve().parents[1] / "data"
+for names_file in (DATA_DIR / "rom_names.json", DATA_DIR / "memory_names.json"):  # later files win
+    if names_file.exists():
+        entries = json.loads(names_file.read_text(encoding="utf-8"))
+        NAMES.update({int(h, 16): entry[0] for h, entry in entries.items()})  # entry: [name, type, ...]
+
+# AArch64 encodings: (mask, value) pairs match an instruction class
+ADRP = (0x9F000000, 0x90000000)
+ADD_IMM = (0xFFC00000, 0x91000000)  # ADD Xd, Xn, #imm12
+LDR_IMM = (0xFFC00000, 0xF9400000)  # LDR Xt, [Xn, #imm12 * 8]
+B_OR_BL = (0x7C000000, 0x14000000)
+PACIBSP = 0xD503237F  # first instruction of most functions
+RETURNS = (0xD65F03C0, 0xD65F0FFF)  # RET, RETAB
+PAGE_MASK = ~0xFFF
+ADRP_USE_WINDOW = 7  # look this many instructions after an ADRP for the ADD / LDR that uses it
+FUNC_SEARCH_LIMIT = 0x20000  # how far back func_start looks
+WHOLE_FUNCTION = 5000  # instruction count for 'func'; dis stops at a return when asked for more than 4000
+
+
+def sign_extend(values, bits):
+    return np.where(values & (1 << (bits - 1)), values - (1 << bits), values)
+
+
+def adrp_pages(pcs):
+    """For every word, the page an ADRP there would load (only meaningful where the word is an ADRP)."""
+    imm_lo = (W >> 29) & 3
+    imm_hi = (W >> 5) & 0x7FFFF
+    imm = (imm_hi.astype(np.int64) << 2) | imm_lo
+    imm = sign_extend(imm, 21)
+    return (pcs & PAGE_MASK) + (imm << 12)
+
+
+def adrp_target(page, register, start):
+    """The address an ADRP of page into register leads to: the first ADD or LDR using register in the next
+    few instructions after index start (None if there isn't one)."""
+    for j in range(start, min(start + ADRP_USE_WINDOW, len(W))):
+        word = int(W[j])
+        if (word >> 5) & 31 != register:
+            continue
+        if (word & ADD_IMM[0]) == ADD_IMM[1]:
+            return page + ((word >> 10) & 0xFFF)
+        if (word & LDR_IMM[0]) == LDR_IMM[1]:
+            return page + ((word >> 10) & 0xFFF) * 8
+    return None
 
 
 def xref(targets):
+    """{target: [offsets of code that loads its address (ADRP + ADD/LDR) or branches to it (B/BL)]}."""
     pcs = np.arange(len(W), dtype=np.int64) * 4
-    isadrp = (W & 0x9F000000) == 0x90000000
-    immlo = (W >> 29) & 3
-    immhi = (W >> 5) & 0x7FFFF
-    imm = ((immhi.astype(np.int64) << 2) | immlo)
-    imm = np.where(imm & (1 << 20), imm - (1 << 21), imm)
-    page = (pcs & ~0xFFF) + (imm << 12)
-    rd = W & 31
-    out = {t: [] for t in targets}
-    idx = np.nonzero(isadrp)[0]
-    tpages = {t & ~0xFFF: t for t in targets}
-    for i in idx:
-        pg = int(page[i])
-        if pg not in tpages and not any((t & ~0xFFF) == pg for t in targets):
+    is_adrp = (W & ADRP[0]) == ADRP[1]
+    pages = adrp_pages(pcs)
+    dest_registers = W & 31
+    out = {target: [] for target in targets}
+    target_pages = {target & PAGE_MASK for target in targets}
+    for i in np.nonzero(is_adrp)[0]:
+        page = int(pages[i])
+        if page not in target_pages:
             continue
-        r = int(rd[i])
-        for j in range(i + 1, min(i + 8, len(W))):  # the add/ldr using this register
-            w = int(W[j])
-            if (w & 0xFFC00000) == 0x91000000 and (w >> 5) & 31 == r:  # ADD Xd, Xn, #imm
-                tgt = pg + ((w >> 10) & 0xFFF)
-            elif (w & 0xFFC00000) == 0xF9400000 and (w >> 5) & 31 == r:  # LDR Xt, [Xn, #imm*8]
-                tgt = pg + ((w >> 10) & 0xFFF) * 8
-            else:
-                continue
-            if tgt in out:
-                out[tgt].append(i * 4)
-            break
-    isbl = (W & 0x7C000000) == 0x14000000
-    bimm = (W & 0x03FFFFFF).astype(np.int64)
-    bimm = np.where(bimm & 0x02000000, bimm - 0x04000000, bimm)
-    dest = pcs + bimm * 4
-    for t in targets:
-        out[t] += [int(p) for p in pcs[np.nonzero(isbl & (dest == t))[0]]]
+        address = adrp_target(page, int(dest_registers[i]), i + 1)
+        if address in out:
+            out[address].append(i * 4)
+    is_branch = (W & B_OR_BL[0]) == B_OR_BL[1]
+    branch_offsets = sign_extend((W & 0x03FFFFFF).astype(np.int64), 26)
+    destinations = pcs + branch_offsets * 4
+    for target in targets:
+        out[target] += [int(pc) for pc in pcs[np.nonzero(is_branch & (destinations == target))[0]]]
     return out
 
 
 def func_start(off):
-    for o in range(off, max(off - 0x20000, 0), -4):
-        w = struct.unpack_from("<I", BIN, o)[0]
-        if w == 0xD503237F:  # pacibsp
+    """The start of the function containing off: a PACIBSP, or just after the previous return or zero word."""
+    for o in range(off, max(off - FUNC_SEARCH_LIMIT, 0), -4):
+        word = struct.unpack_from("<I", BIN, o)[0]
+        if word == PACIBSP:
             return o
-        if w in (0xD65F03C0, 0xD65F0FFF, 0) and o != off:
+        if (word in RETURNS or word == 0) and o != off:
             return o + 4
     return off
 
 
 def dis(off, n):
+    """Disassemble n instructions from off, naming 32-bit constants built with MOV / MOVK that are field hashes."""
     import capstone
     md = capstone.Cs(capstone.CS_ARCH_ARM64, capstone.CS_MODE_ARM)
-    regs = {}
+    registers = {}  # register (as wN) -> constant last moved into it
     for ins in md.disasm(BIN[off:off + 4 * n], off):
         note = ""
-        op = ins.op_str
-        if ins.mnemonic in ("mov", "movz", "movk") and "#" in op:
-            r = op.split(",")[0].strip().replace("x", "w")
+        operands = ins.op_str
+        if ins.mnemonic in ("mov", "movz", "movk") and "#" in operands:
+            register = operands.split(",")[0].strip().replace("x", "w")
             try:
-                v = int(op.split("#")[1].split(",")[0], 0)
+                value = int(operands.split("#")[1].split(",")[0], 0)
             except ValueError:
-                v = None
-            if v is not None:
-                if ins.mnemonic == "movk" and "lsl #16" in op:
-                    v = (regs.get(r, 0) & 0xFFFF) | (v << 16)
-                regs[r] = v & 0xFFFFFFFF
-                if regs[r] in NAMES:
-                    note = f"   ; {NAMES[regs[r]]}"
-        if ins.mnemonic == "adrp":
-            pass
-        if ins.mnemonic in ("bl", "b"):
-            note = ""
-        print(f"  {ins.address:#09x}: {ins.mnemonic:<6} {op}{note}")
+                value = None
+            if value is not None:
+                if ins.mnemonic == "movk" and "lsl #16" in operands:
+                    value = (registers.get(register, 0) & 0xFFFF) | (value << 16)
+                registers[register] = value & 0xFFFFFFFF
+                if registers[register] in NAMES:
+                    note = f"   ; {NAMES[registers[register]]}"
+        print(f"  {ins.address:#09x}: {ins.mnemonic:<6} {operands}{note}")
         if ins.mnemonic in ("ret", "retab") and n > 4000:
             break
 
 
 def string_at(off):
-    e = BIN.index(b"\0", off)
-    return BIN[off:e].decode("latin-1")
+    end = BIN.index(b"\0", off)
+    return BIN[off:end].decode("latin-1")
 
 
 def main():
-    cmd = sys.argv[2]
-    if cmd == "xref":
-        ts = [int(x, 0) for x in sys.argv[3:]]
-        for t, refs in xref(ts).items():
-            print(f"{t:#x} {string_at(t)[:50]!r}: {len(refs)} ref(s)")
-            for r in refs:
-                print(f"   {r:#x}  (function {func_start(r):#x})")
-    elif cmd == "dis":
+    command = sys.argv[2]
+    if command == "xref":
+        targets = [int(x, 0) for x in sys.argv[3:]]
+        for target, refs in xref(targets).items():
+            print(f"{target:#x} {string_at(target)[:50]!r}: {len(refs)} ref(s)")
+            for ref in refs:
+                print(f"   {ref:#x}  (function {func_start(ref):#x})")
+    elif command == "dis":
         dis(int(sys.argv[3], 0), int(sys.argv[4]) if len(sys.argv) > 4 else 64)
-    elif cmd == "func":
-        s = func_start(int(sys.argv[3], 0))
-        print(f"function at {s:#x}")
-        dis(s, 5000)
+    elif command == "func":
+        start = func_start(int(sys.argv[3], 0))
+        print(f"function at {start:#x}")
+        dis(start, WHOLE_FUNCTION)
 
 
 if __name__ == "__main__":

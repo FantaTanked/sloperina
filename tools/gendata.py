@@ -14,6 +14,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 # --- same lists as ootmenu.pyw -----------------------------------------------------------------
+# The item screen, in order: (kind, field title). "owned" items have an owned flag; "acquired" ones only an
+# acquisition-history entry; "trade" and "ocarina" are the special slots (their title is just a label).
 ITEM_SCREEN = ([("acquired", "Deku sticks"), ("owned", "Fairy Slingshot"), ("owned", "Boomerang"),
                 ("acquired", "Deku nuts"), ("acquired", "Bombs"), ("acquired", "Bombchus"), ("owned", "Hammer"),
                 ("owned", "Hookshot"), ("owned", "Longshot"), ("owned", "Fairy Bow"), ("owned", "Arrow Fire"),
@@ -25,6 +27,7 @@ GEAR = ["Kokiri Sword", "Master Sword", "Giant’s Knife", "Broken Giant’s Kni
         "Deku Shield", "Hylian Shield", "Mirror Shield", "Goron Tunic", "Zora Tunic", "Iron Boots", "Hover Boots",
         # owned flags only (inventory > collection); giving one for real is the ocarina switch
         "Fairy Ocarina", "Ocarina of Time"]
+# (label, item name, button item); the first N_CHILD_TRADE_ITEMS are the child's, the rest the adult's
 TRADE_ITEMS = [("weird egg", "Item_WeirdEgg", "WeirdEgg"), ("cucco", "Item_AlarmCucco", "AlarmCucco"),
                ("zelda's letter", "Item_ZeldaLetter", "ZeldaLetter"), ("pocket egg", "Item_PocketEgg", "PocketEgg"),
                ("pocket cucco", "Item_PocketCucco", "PocketCucco"), ("cojiro", "Item_CojiroCucco", "CojiroCucco"),
@@ -33,14 +36,25 @@ TRADE_ITEMS = [("weird egg", "Item_WeirdEgg", "WeirdEgg"), ("cucco", "Item_Alarm
                ("prescription", "Item_Prescription", "Prescription"),
                ("eyeball frog", "Item_EyeballFrog", "EyeballFrog"), ("eye drops", "Item_EyeDrop", "EyeDrop"),
                ("claim check", "Item_ClaimCheck", "ClaimCheck")]
-MASKS = [("bunny hood" if m == "Bunny" else f"{m.lower()} mask", f"Armor_Child_Mask_{m}", f"{m}Mask")
-         for m in ("Keaton", "Skull", "Spooky", "Bunny", "Goron", "Zora", "Gerudo", "Truth")]
+N_CHILD_TRADE_ITEMS = 3  # weird egg, cucco, Zelda's letter
+
+
+def _mask_row(mask):
+    """(label, item name, button item) for a mask, in the same shape as TRADE_ITEMS."""
+    label = "bunny hood" if mask == "Bunny" else f"{mask.lower()} mask"
+    return (label, f"Armor_Child_Mask_{mask}", f"{mask}Mask")
+
+
+MASKS = [_mask_row(mask) for mask in ("Keaton", "Skull", "Spooky", "Bunny", "Goron", "Zora", "Gerudo", "Truth")]
+# item title -> the item name the game uses when it is put on a button
 BUTTON_ITEM = {"Fairy Slingshot": "SlingShot", "Fairy Bow": "Bow", "Arrow Fire": "FireArrow",
                "Arrow Ice": "IceArrow", "Arrow Light": "LightArrow", "Boomerang": "Boomerang",
                "Hookshot": "Hookshot", "Longshot": "Longshot", "Hammer": "Hammer",
                "Lens of Truth": "GlassTruth", "Din’s Fire": "DinFire", "Farore’s Wind": "FaroreWind",
                "Nayru’s Love": "NayruLove", "Iron Boots": "HeavyBoot", "Hover Boots": "HoverBoot"}
+# equipment slot -> the gamedata.h index of the String64 save field that holds what is worn there
 GD_STR = {"sword": "GD_STR_SWORD", "shield": "GD_STR_SHIELD", "tunic": "GD_STR_TUNIC", "boots": "GD_STR_BOOTS"}
+# gear title -> (equipment slot, the value that slot holds when it is worn)
 WORN_GEAR = {"Kokiri Sword": ("sword", "Weapon_Sword_Kokiri"), "Master Sword": ("sword", "Weapon_Sword_Master"),
              "Giant’s Knife": ("sword", "Weapon_Sword_Giant"),
              "Broken Giant’s Knife": ("sword", "Weapon_Sword_BrokenGiant"),
@@ -48,6 +62,7 @@ WORN_GEAR = {"Kokiri Sword": ("sword", "Weapon_Sword_Kokiri"), "Master Sword": (
              "Hylian Shield": ("shield", "Weapon_Shield_Hylian"), "Mirror Shield": ("shield", "Weapon_Shield_Mirror"),
              "Goron Tunic": ("tunic", "Armor_Adult_Goron"), "Zora Tunic": ("tunic", "Armor_Adult_Zora"),
              "Iron Boots": ("boots", "Armor_Adult_HeavyBoot"), "Hover Boots": ("boots", "Armor_Adult_HoverBoot")}
+# (label, count field title, capacity field title or a fixed capacity, acquisition-history title)
 AMMO = [("deku sticks", "Deku sticks", "Deku Stick capacity", "Deku sticks"),
         ("deku nuts", "Deku nuts", "Deku Nut capacity", "Deku nuts"),
         ("deku seeds", "Deku seeds", "Deku Seed capacity", "Deku Seed"),
@@ -58,6 +73,7 @@ SONGS = ["Zelda's Lullaby", "Epona's Song", "Saria's Song", "Sun's Song", "Song 
          "Nocturne of Shadow", "Prelude of Light"]
 QUEST_ITEMS = ["Kokiri's Emerald", "Goron's Ruby", "Zora's Sapphire", "Forest Medallion", "Fire Medallion",
                "Water Medallion", "Spirit Medallion", "Shadow Medallion", "Light Medallion"]
+# (dungeon name in the save fields, label)
 DUNGEON_LIST = [("Inside The Deku Tree", "deku tree"), ("Dodongo Cavern", "dodongo's cavern"),
                 ("Inside Jabu Jabu Belly", "jabu-jabu"), ("Forest Temple", "forest temple"),
                 ("Fire Temple", "fire temple"), ("Water Temple", "water temple"),
@@ -65,14 +81,17 @@ DUNGEON_LIST = [("Inside The Deku Tree", "deku tree"), ("Dodongo Cavern", "dodon
                 ("Bottom Of The Well", "bottom of well"), ("Ice Cavern", "ice cavern"),
                 ("Gerudo Training Ground", "gerudo training"), ("Gerudo Fortress", "gerudo fortress"),
                 ("Inside Ganon Castle", "ganon's castle"), ("Final Battle Field", "final battle")]
+# (field under dungeons/<dungeon>/, label, acquisition-history title)
 DUNGEON_ITEMS = [("Map", "map", "Dungeon Map"), ("Compass", "compass", "Dungeon Compass"),
                  ("Boss key", "boss key", "Dungeon Boss Key")]
+# bottle contents -> acquisition-history title
 BOTTLE_ACQ = {"Red Potion": "Bottle Red Potion", "Green Potion": "Bottle Green Potion",
               "Blue Potion": "Bottle Blue Potion", "Blue Fire": "Bottle Blue Fire", "Fish": "Bottle Fish",
               "Letter": "Bottle Letter", "Big Poe": "Bottle Big Poe", "Poe": "Bottle Poe", "Bug": "Bottle Bug",
               "Fairy": "Bottle Fairy", "Max Milk": "Bottle Milk", "Half Milk": "Bottle Half Milk"}
 DUNGEON_KEYS = ["Forest Temple", "Fire Temple", "Water Temple", "Shadow Temple", "Spirit Temple",
                 "Bottom Of The Well", "Gerudo Training Ground", "Inside Ganon Castle"]
+# quest field name -> label, where the name made readable (quest_label) isn't clear enough
 QUEST_NAMES = {"Step_Get_StoneOfForest": "deku tree", "Step_Get_StoneOfFire": "dodongo's cavern",
                "Step_Get_StoneOfWater": "jabu-jabu", "Step_SageOfForest": "forest temple",
                "Step_SageOfFire": "fire temple", "Step_SageOfWater": "water temple",
@@ -81,39 +100,58 @@ QUEST_NAMES = {"Step_Get_StoneOfForest": "deku tree", "Step_Get_StoneOfFire": "d
                "Step_SubEvent_GetSwordBigGoron": "biggoron sword", "Step_SubEvent_AllBossBattle": "boss rush",
                "Step_Goto_HyruleCastle": "zelda / castle", "Step_Meet_DekuTree": "kokiri sword",
                "Step_Minigame_SkullKidSession": "skull kid song"}
+# spawns that only work once something in the world has been done
 GATED_SPAWNS = {"MountainTrail_DodongoCavernSide": "boulder bombed",
                 "GoronCity_LostWoodSide_before": "lost woods wall bombed",
                 "GoronCity_LostWoodSide_after": "lost woods wall bombed",
                 "LostWood_GoronCitySide_before": "goron city wall bombed",
                 "LostWood_GoronCitySide_after": "goron city wall bombed"}
+# maps that count as dungeons (warp category and the warp_map_t dungeon flag)
 DUNGEONS = {"InsideTheDekuTree", "DodongoCavern", "InsideJabuJabuBelly", "ForestTemple", "FireTemple",
             "WaterTemple", "ShadowTemple", "SpiritTemple", "BottomOfTheWell", "IceCavern",
             "GerudoTrainingGround", "InsideGanonCastle", "CrumblingGanonCastle"}
+# typos in the game's map and spawn names
 NAME_FIXES = {"hounted": "haunted", "musuem": "museum", "caslte": "castle", "wateland": "wasteland",
               "caven": "cavern"}
+# warp menu categories, indexed like data.h's WC_* enum
 CATEGORIES = ["overworld (child)", "overworld (adult)", "dungeons", "boss & battle rooms", "other"]
+WC_CHILD, WC_ADULT, WC_DUNGEON, WC_BOSS, WC_OTHER = range(len(CATEGORIES))
+
+# air walls: airshape_t type, and airwall_t kind (does it stop Link?)
+SHAPE_BOX, SHAPE_CYLINDER = 0, 1
+WALL_STOPS_PLAYER, WALL_IGNORES_PLAYER = 0, 1
+PLAYER_MASKS = {"HitOnlyPlayer", "Default", None}  # rigid-body hit masks that stop Link (airwall.py PLAYER_MASKS)
+
+NO_FIELD = "{ 0, FT_NONE }"
+FIELD_TYPES = {"Int": "FT_INT", "Bool": "FT_BOOL", "Enum": "FT_ENUM", "Float": "FT_FLOAT"}
 
 
 def pretty(name):
+    """A game name made readable: 'KokiriForest_Child' -> 'kokiri forest (child)'."""
     parts = name.split("_")
-    tags = [p.lower() for p in parts[1:] if p in ("Child", "Adult", "Alternative")]
-    words = " ".join(p for p in parts if p.lower() not in tags)
+    tags = [part.lower() for part in parts[1:] if part in ("Child", "Adult", "Alternative")]
+    words = " ".join(part for part in parts if part.lower() not in tags)
+    # split CamelCase and letter/digit runs into words
     words = re.sub(r"(?<=[a-z])(?=[A-Z0-9])|(?<=[A-Z])(?=[A-Z][a-z])", " ", words).lower()
     for typo, fixed in NAME_FIXES.items():
         words = words.replace(typo, fixed)
-    return words + (f" ({' '.join(tags)})" if tags else "")
+    if tags:
+        return f"{words} ({' '.join(tags)})"
+    return words
 
 
 def map_label(name):
     """pretty() without the (child) / (adult) tag: the warps menu's category (breadcrumb) says it."""
-    return re.sub(r" \((child|adult)\)$", "", re.sub(r" \((child|adult) ", " (", pretty(name)))
+    label = re.sub(r" \((child|adult) ", " (", pretty(name))
+    return re.sub(r" \((child|adult)\)$", "", label)
 
 
 def quest_label(name):
+    """A quest field name as a menu label: 'Step_SubEvent_GetSwordBigGoron' -> 'biggoron sword'."""
     if name in QUEST_NAMES:
         return QUEST_NAMES[name]
-    n = re.sub(r"^Step_(Get_|Goto_|SubEvent_|Mini[Gg]ame_)?", "", name).replace("_", " ")
-    return re.sub(r"(?<=[a-z])(?=[A-Z])", " ", n).lower()
+    words = re.sub(r"^Step_(Get_|Goto_|SubEvent_|Mini[Gg]ame_)?", "", name).replace("_", " ")
+    return re.sub(r"(?<=[a-z])(?=[A-Z])", " ", words).lower()
 
 
 def label_of(title):
@@ -121,206 +159,314 @@ def label_of(title):
 
 
 def category(name):
+    """The warp menu category (WC_*) of a map."""
     if name in DUNGEONS:
-        return 2
+        return WC_DUNGEON
     if name.endswith("Stage") or name in ("BossRushIntervalRoom", "FinalBattleField"):
-        return 3
+        return WC_BOSS
     if name.endswith("_Child"):
-        return 0
+        return WC_CHILD
     if "_Adult" in name or name in ("HyruleCastle", "GanonCastle"):
-        return 1
-    return 4
+        return WC_ADULT
+    return WC_OTHER
 
 
-def c(s):
-    return "NULL" if s is None else json.dumps(s.replace("’", "'"))
+def c_string(text):
+    """A C string literal (or NULL); the menu font has no curly apostrophe."""
+    if text is None:
+        return "NULL"
+    return json.dumps(text.replace("’", "'"))
 
 
-def fl(v):
-    t = f"{v:g}"
-    return t + ("" if any(ch in t for ch in ".en") else ".0") + "f"
+def c_float(value):
+    """A C float literal: 1 -> '1.0f', 0.25 -> '0.25f', 1e-05 -> '1e-05f'."""
+    text = f"{value:g}"
+    if not any(ch in text for ch in ".en"):  # an integer: make it a float literal
+        text += ".0"
+    return text + "f"
+
+
+def c_vec3(vector):
+    return f"{{ {c_float(vector[0])}, {c_float(vector[1])}, {c_float(vector[2])} }}"
+
+
+def read_json(name):
+    return json.loads((ROOT / "data" / name).read_text(encoding="utf-8"))
+
+
+class DataWriter:
+    """Collects the lines of data.c and looks up save fields by title."""
+
+    def __init__(self, field_hashes, extra_fields):
+        self.lines = []
+        self.extra = extra_fields
+        # title -> (hash, type) of the save fields, leaving out the two bookkeeping groups
+        self.fields = {}
+        # title -> hash of its "Acquisition history" entry (the game's record that an item was ever got)
+        self.acquired = {}
+        for hash_hex, meta in field_hashes.items():
+            group = meta.get("group")
+            if group not in ("Acquisition history", "Assignment order"):
+                self.fields[meta["title"]] = (int(hash_hex, 16), meta.get("type", "Int"))
+            if group == "Acquisition history":
+                self.acquired[meta["title"]] = int(hash_hex, 16)
+
+    def write(self, line):
+        self.lines.append(line)
+
+    def end_array(self, name, blank_line=True):
+        """Close an array and define its data_n_* element count."""
+        count_name = name.replace("data_", "data_n_")
+        self.write(f"}};\nconst int {count_name} = sizeof({name}) / sizeof(*{name});" + ("\n" if blank_line else ""))
+
+    def field_hash(self, title):
+        return self.fields[title][0]
+
+    def extra_hash(self, key):
+        return int(self.extra[key]["hash"], 16)
+
+    def acquired_hash(self, title):
+        return f"{self.acquired.get(title, 0):#010x}"
+
+    @staticmethod
+    def field(field_hash, field_type):
+        """A field_t initialiser."""
+        return f"{{ {field_hash:#010x}, {FIELD_TYPES[field_type]} }}"
+
+    def extra_field(self, key):
+        """field_t of an extra_fields.json entry, or an empty field if it isn't there."""
+        if key not in self.extra:
+            return NO_FIELD
+        return self.field(self.extra_hash(key), self.extra[key]["type"])
+
+    def inv_item(self, title, kind):
+        """An inv_item_t row for an item with an owned flag (and maybe a button item and a worn slot)."""
+        field_hash, field_type = self.fields.get(title, (0, "Int"))
+        slot, worn = WORN_GEAR.get(title, (None, None))
+        slot_string = GD_STR[slot] if slot else -1
+        return (f"  {{ {c_string(label_of(title))}, {kind}, {self.field(field_hash, field_type)}, "
+                f"{self.acquired_hash(title)}, {c_string(BUTTON_ITEM.get(title))}, {slot_string}, {c_string(worn)} }},")
+
+    def flag(self, label, keys, acquired_title=None):
+        """A flag_t: up to two extra fields set together, and the acquisition entry to set with them."""
+        flag_fields = [self.extra_field(key) for key in keys] + [NO_FIELD] * (2 - len(keys))
+        acquired = self.acquired_hash(acquired_title) if acquired_title else 0
+        return f"{{ {c_string(label)}, {{ {flag_fields[0]}, {flag_fields[1]} }}, {acquired} }}"
+
+    def pouch_table(self, name, rows):
+        """A pouch_one_t table: items that share one pouch slot (masks, trade items)."""
+        self.write(f"const pouch_one_t {name}[] = {{")
+        for label, item, button in rows:
+            self.write(f"  {{ {c_string(label)}, {c_string(item)}, {c_string(button)} }},")
+        self.end_array(name)
+
+
+def write_items(out):
+    """The item screen, the gear, the pouches and the ammo."""
+    out.write("const inv_item_t data_items[] = {")
+    for kind, title in ITEM_SCREEN:
+        if kind == "trade":
+            trade_kind = "IK_TRADE_CHILD" if title == "child" else "IK_TRADE_ADULT"
+            out.write(f"  {{ {c_string(title + ' trade')}, {trade_kind}, {NO_FIELD}, 0, NULL, -1, NULL }},")
+        elif kind == "ocarina":
+            out.write(f'  {{ "ocarina", IK_OCARINA, {NO_FIELD}, 0, NULL, -1, NULL }},')
+        elif kind == "acquired":
+            out.write(f"  {{ {c_string(label_of(title))}, IK_ACQUIRED, {NO_FIELD}, {out.acquired_hash(title)}, "
+                      f"NULL, -1, NULL }},")
+        else:
+            out.write(out.inv_item(title, "IK_OWNED"))
+    out.end_array("data_items")
+    out.write("const inv_item_t data_gear[] = {")
+    for title in GEAR:
+        out.write(out.inv_item(title, "IK_OWNED"))
+    out.end_array("data_gear")
+
+    out.pouch_table("data_masks", MASKS)
+    out.pouch_table("data_trade_child", TRADE_ITEMS[:N_CHILD_TRADE_ITEMS])
+    out.pouch_table("data_trade_adult", TRADE_ITEMS[N_CHILD_TRADE_ITEMS:])
+
+    out.write("const ammo_t data_ammo[] = {")
+    for label, count_title, capacity, acquired_title in AMMO:
+        capacity_field = out.field_hash(capacity) if isinstance(capacity, str) else 0
+        fixed_capacity = capacity if isinstance(capacity, int) else 0
+        out.write(f"  {{ {c_string(label)}, {out.field_hash(count_title):#010x}, {capacity_field:#010x}, "
+                  f"{fixed_capacity}, {out.acquired_hash(acquired_title)} }},")
+    out.end_array("data_ammo")
+
+
+def write_quest_status(out):
+    """Quest items, songs, dungeon items and keys, and the single flags and counters."""
+    out.write("const flag_t data_quest_items[] = {")
+    for title in QUEST_ITEMS:
+        out.write("  " + out.flag(label_of(title), [f"quests/Quest items/{title}", f"inventory/Items/{title}"]) + ",")
+    out.end_array("data_quest_items")
+    out.write("const flag_t data_songs[] = {")
+    for title in SONGS:
+        out.write("  " + out.flag(label_of(title), [f"quests/Songs/{title}"]) + ",")
+    out.end_array("data_songs")
+    out.write("const dungeon_t data_dungeons[] = {")
+    for dungeon, label in DUNGEON_LIST:
+        items = ", ".join(out.flag(item_label, [f"dungeons/{dungeon}/{item}"], acquired_title)
+                          for item, item_label, acquired_title in DUNGEON_ITEMS)
+        out.write(f"  {{ {c_string(label)}, {{ {items} }} }},")
+    out.end_array("data_dungeons")
+    out.write("const number_t data_small_keys[] = {")
+    for dungeon in DUNGEON_KEYS:
+        out.write(f"  {{ {c_string(label_of(dungeon))}, {out.field_hash(f'{dungeon} small keys'):#010x} }},")
+    out.end_array("data_small_keys")
+    out.write(f'const number_t data_skulltulas = {{ "skulltulas", {out.field_hash("Gold Skulltula tokens"):#010x} }};')
+    out.write("const flag_t data_double_defense = " + out.flag("double defense", ["link/Abilities/Double defense"])
+              + ";")
+    agony = out.flag("stone of agony", ["equipment/Effects & appearance/Stone of Agony equipped"], "Agony Stone")
+    out.write("const flag_t data_agony = " + agony + ";\n")
+
+
+def write_bottles_and_abilities(out):
+    out.write("const bottle_t data_bottles[5] = {")
+    for bottle in "ABCDE":
+        item = out.extra_field(f"inventory/Items/Bottle {bottle}")
+        available = out.extra_hash(f"inventory/Bottles/Bottle {bottle} available")
+        contents = out.extra_hash(f"inventory/Bottles/Bottle {bottle} contents")
+        out.write(f"  {{ {item}, {available:#010x}, {contents:#010x} }},")
+    out.write("};")
+    # every bottle has the same contents enum: (value, name) pairs
+    choices = out.extra["inventory/Bottles/Bottle A contents"]["choices"]
+    names = ", ".join(c_string(name.lower()) for _, name in choices)
+    values = ", ".join(f"{value:#010x}" for value, _ in choices)
+    acquired = ", ".join(out.acquired_hash(BOTTLE_ACQ.get(name, "")) for _, name in choices)
+    out.write("const char *const data_bottle_names[] = { " + names + " };")
+    out.write("const uint32_t data_bottle_values[] = { " + values + " };")
+    out.write("const uint32_t data_bottle_acquired[] = { " + acquired + " };")
+    out.write(f"const int data_n_bottle_contents = {len(choices)};")
+    out.write(f"const uint32_t data_acquired_bottle = {out.acquired_hash('Bottle')};\n")
+
+    strength = out.extra["link/Abilities/Strength"]
+    strength_values = ", ".join(f"{value:#010x}" for value, _ in strength["choices"])
+    out.write(f"const field_t data_strength = {out.extra_field('link/Abilities/Strength')};")
+    out.write("const uint32_t data_strength_values[4] = { " + strength_values + " };")
+    out.write(f"const field_t data_diving_depth = {out.extra_field('link/Abilities/Diving depth')};")
+    out.write("const float data_scale_depths[3] = { 3.0f, 6.0f, 9.0f };\n")
+
+
+def write_story(out, story):
+    """The quests (sorted by label) with their stages, and the tutorial (action guide) fields. Returns the quests."""
+    quests = sorted(story["quests"].items(), key=lambda item: quest_label(item[1]["name"]))
+    for i, (_, quest) in enumerate(quests):
+        stages = ", ".join(c_string(stage) for stage in quest["stages"])
+        out.write(f"static const char *const stages_{i}[] = {{ " + stages + " };")
+    out.write("const quest_t data_quests[] = {")
+    for i, (hash_hex, quest) in enumerate(quests):
+        out.write(f"  {{ {c_string(quest_label(quest['name']))}, {int(hash_hex, 16):#010x}, {len(quest['stages'])}, "
+                  f"stages_{i} }},")
+    out.end_array("data_quests")
+    guides = story["action_guides"]
+    guide_hashes = ", ".join(f"{int(hash_hex, 16):#010x}" for hash_hex in guides.values())
+    out.write("const uint32_t data_action_guides[] = { " + guide_hashes + " };")
+    out.write("const int data_n_action_guides = sizeof(data_action_guides) / sizeof(*data_action_guides);")
+    out.write(f"const uint32_t data_action_guide_navi = {int(guides['Navi'], 16):#010x};\n")
+    return quests
+
+
+def spawn_label(position, source):
+    """A spawn's menu label: its name, plus what it needs or where it is entered from."""
+    label = pretty(position)
+    if position in GATED_SPAWNS:
+        return f"{label} [needs {GATED_SPAWNS[position]}]"
+    origin = ""
+    if source.startswith("from "):
+        origin = pretty(source[len("from "):]).split(" (")[0]
+    if origin and origin != label:
+        label = f"{label} (from {origin})"
+    return label
+
+
+def write_warps(out, warps, starters):
+    """The warp menu: maps by category then label, each with its spawns. Returns (maps, spawns)."""
+    out.write("const char *const data_warp_categories[WC_COUNT] = { "
+              + ", ".join(c_string(name) for name in CATEGORIES) + " };")
+    spawns, maps = [], []
+    for map_category in range(len(CATEGORIES)):
+        names = sorted((name for name in warps["spawns"] if category(name) == map_category), key=pretty)
+        for name in names:
+            first = len(spawns)
+            for position, event, source in warps["spawns"][name]:
+                # does the spawn have an event starter actor (tools/spawnstarters.py)?
+                has_starter = int(bool(starters.get(name, {}).get(position)))
+                spawns.append((spawn_label(position, source), position, event, has_starter))
+            maps.append((name, map_label(name), map_category, int(name in DUNGEONS), first, len(spawns) - first))
+    out.write("const warp_map_t data_warp_maps[] = {")
+    for name, label, map_category, is_dungeon, first, count in maps:
+        out.write(f"  {{ {c_string(name)}, {c_string(label)}, {map_category}, {is_dungeon}, {first}, {count} }},")
+    out.end_array("data_warp_maps")
+    out.write("const spawn_t data_spawns[] = {")
+    for label, position, event, has_starter in spawns:
+        out.write(f"  {{ {c_string(label)}, {c_string(position)}, {c_string(event)}, {has_starter} }},")
+    out.end_array("data_spawns", blank_line=False)
+    return maps, spawns
+
+
+def write_airwalls(out, airwall_maps):
+    """Air walls (airwalls.json, from tools/airwalls.py): per map, the walls with their shapes.
+
+    Returns (walls, maps)."""
+    out.write("")
+    out.write("const airshape_t data_airshapes[] = {")
+    walls, maps = [], []
+    n_shapes = 0
+    for name in sorted(airwall_maps):
+        first_wall = len(walls)
+        for wall in airwall_maps[name]:
+            first_shape = n_shapes
+            for shape in wall["shapes"]:
+                if shape["type"] == "box":
+                    shape_type = SHAPE_BOX
+                    a, b, radius = shape["center"], shape["half"], 0.0
+                else:
+                    shape_type = SHAPE_CYLINDER
+                    a, b, radius = shape["a"], shape["b"], shape["radius"]
+                out.write(f"  {{ {shape_type}, {c_vec3(a)}, {c_vec3(b)}, {c_float(radius)} }},")
+                n_shapes += 1
+            kind = WALL_STOPS_PLAYER if wall.get("mask") in PLAYER_MASKS else WALL_IGNORES_PLAYER
+            walls.append((wall["t"], wall["r"], wall["s"], first_shape, n_shapes - first_shape, kind))
+        maps.append((name, first_wall, len(walls) - first_wall))
+    out.write("};")
+    out.write("const airwall_t data_airwalls[] = {")
+    for translation, rotation, scale, first_shape, count, kind in walls:
+        out.write(f"  {{ {c_vec3(translation)}, {c_vec3(rotation)}, {c_vec3(scale)}, "
+                  f"{first_shape}, {count}, {kind} }},")
+    out.write("};")
+    out.write("const airmap_t data_airmaps[] = {")
+    for name, first_wall, count in maps:
+        out.write(f"  {{ {c_string(name)}, {first_wall}, {count} }},")
+    out.end_array("data_airmaps", blank_line=False)
+    return walls, maps
 
 
 def main():
-    fields = json.loads((ROOT / "data" / "field_hashes.json").read_text(encoding="utf-8"))
-    extra = json.loads((ROOT / "data" / "extra_fields.json").read_text(encoding="utf-8"))
-    story = json.loads((ROOT / "data" / "story.json").read_text(encoding="utf-8"))
-    warps = json.loads((ROOT / "data" / "warps.json").read_text(encoding="utf-8"))
-    starters = json.loads((ROOT / "data" / "spawn_starters.json").read_text(encoding="utf-8"))
-    F = {m["title"]: (int(h, 16), m.get("type", "Int")) for h, m in fields.items()
-         if m.get("group") not in ("Acquisition history", "Assignment order")}
-    A = {m["title"]: int(h, 16) for h, m in fields.items() if m.get("group") == "Acquisition history"}
-    TYPES = {"Int": "FT_INT", "Bool": "FT_BOOL", "Enum": "FT_ENUM", "Float": "FT_FLOAT"}
+    field_hashes = read_json("field_hashes.json")
+    extra = read_json("extra_fields.json")
+    story = read_json("story.json")
+    warps = read_json("warps.json")
+    starters = read_json("spawn_starters.json")
+    out = DataWriter(field_hashes, extra)
 
-    def fld(h, t):
-        return f"{{ {h:#010x}, {TYPES[t]} }}"
+    out.lines += ["/* Generated by tools/gendata.py from field_hashes.json, extra_fields.json, story.json and",
+                  " * warps.json. Don't edit by hand. */", '#include "data.h"', '#include "gamedata.h"', "",
+                  "#define NULL ((void *)0)", ""]
+    write_items(out)
+    write_quest_status(out)
+    write_bottles_and_abilities(out)
+    quests = write_story(out, story)
+    maps, spawns = write_warps(out, warps, starters)
+    walls, airwall_maps = write_airwalls(out, read_json("airwalls.json")["maps"])
 
-    def xf(key):
-        return fld(int(extra[key]["hash"], 16), extra[key]["type"]) if key in extra else "{ 0, FT_NONE }"
-
-    def acq(title):
-        return f"{A.get(title, 0):#010x}"
-
-    out = ["/* Generated by tools/gendata.py from field_hashes.json, extra_fields.json, story.json and",
-           " * warps.json. Don't edit by hand. */", '#include "data.h"', '#include "gamedata.h"', "",
-           "#define NULL ((void *)0)", ""]
-    w = out.append
-
-    def inv_item(title, kind):
-        h, t = F.get(title, (0, "Int"))
-        slot, worn = WORN_GEAR.get(title, (None, None))
-        return (f"  {{ {c(label_of(title))}, {kind}, {fld(h, t)}, {acq(title)}, {c(BUTTON_ITEM.get(title))}, "
-                f"{GD_STR[slot] if slot else -1}, {c(worn)} }},")
-
-    w("const inv_item_t data_items[] = {")
-    for kind, t in ITEM_SCREEN:
-        if kind == "trade":
-            w(f"  {{ {c(t + ' trade')}, {'IK_TRADE_CHILD' if t == 'child' else 'IK_TRADE_ADULT'}, {{ 0, FT_NONE }}, 0, NULL, -1, NULL }},")
-        elif kind == "ocarina":
-            w('  { "ocarina", IK_OCARINA, { 0, FT_NONE }, 0, NULL, -1, NULL },')
-        elif kind == "acquired":
-            w(f"  {{ {c(label_of(t))}, IK_ACQUIRED, {{ 0, FT_NONE }}, {acq(t)}, NULL, -1, NULL }},")
-        else:
-            w(inv_item(t, "IK_OWNED"))
-    w("};\nconst int data_n_items = sizeof(data_items) / sizeof(*data_items);\n")
-    w("const inv_item_t data_gear[] = {")
-    for t in GEAR:
-        w(inv_item(t, "IK_OWNED"))
-    w("};\nconst int data_n_gear = sizeof(data_gear) / sizeof(*data_gear);\n")
-
-    def one_table(name, rows):
-        w(f"const pouch_one_t {name}[] = {{")
-        for lbl, item, button in rows:
-            w(f"  {{ {c(lbl)}, {c(item)}, {c(button)} }},")
-        w(f"}};\nconst int {name.replace('data_', 'data_n_')} = sizeof({name}) / sizeof(*{name});\n")
-    one_table("data_masks", MASKS)
-    one_table("data_trade_child", TRADE_ITEMS[:3])
-    one_table("data_trade_adult", TRADE_ITEMS[3:])
-
-    w("const ammo_t data_ammo[] = {")
-    for lbl, title, cap, acq_title in AMMO:
-        capf = F[cap][0] if isinstance(cap, str) else 0
-        fixed = cap if isinstance(cap, int) else 0
-        w(f"  {{ {c(lbl)}, {F[title][0]:#010x}, {capf:#010x}, {fixed}, {acq(acq_title)} }},")
-    w("};\nconst int data_n_ammo = sizeof(data_ammo) / sizeof(*data_ammo);\n")
-
-    def flag(lbl, keys, acq_title=None):
-        f = [xf(k) for k in keys] + ["{ 0, FT_NONE }"] * (2 - len(keys))
-        return f"{{ {c(lbl)}, {{ {f[0]}, {f[1]} }}, {acq(acq_title) if acq_title else 0} }}"
-
-    w("const flag_t data_quest_items[] = {")
-    for q in QUEST_ITEMS:
-        w("  " + flag(label_of(q), [f"quests/Quest items/{q}", f"inventory/Items/{q}"]) + ",")
-    w("};\nconst int data_n_quest_items = sizeof(data_quest_items) / sizeof(*data_quest_items);\n")
-    w("const flag_t data_songs[] = {")
-    for s in SONGS:
-        w("  " + flag(label_of(s), [f"quests/Songs/{s}"]) + ",")
-    w("};\nconst int data_n_songs = sizeof(data_songs) / sizeof(*data_songs);\n")
-    w("const dungeon_t data_dungeons[] = {")
-    for d, lbl in DUNGEON_LIST:
-        items = ", ".join(flag(l, [f"dungeons/{d}/{t}"], a) for t, l, a in DUNGEON_ITEMS)
-        w(f"  {{ {c(lbl)}, {{ {items} }} }},")
-    w("};\nconst int data_n_dungeons = sizeof(data_dungeons) / sizeof(*data_dungeons);\n")
-    w("const number_t data_small_keys[] = {")
-    for d in DUNGEON_KEYS:
-        w(f"  {{ {c(label_of(d))}, {F[f'{d} small keys'][0]:#010x} }},")
-    w("};\nconst int data_n_small_keys = sizeof(data_small_keys) / sizeof(*data_small_keys);\n")
-    w(f'const number_t data_skulltulas = {{ "skulltulas", {F["Gold Skulltula tokens"][0]:#010x} }};')
-    w("const flag_t data_double_defense = " + flag("double defense", ["link/Abilities/Double defense"]) + ";")
-    w("const flag_t data_agony = " + flag("stone of agony", ["equipment/Effects & appearance/Stone of Agony equipped"],
-                                          "Agony Stone") + ";\n")
-
-    w("const bottle_t data_bottles[5] = {")
-    for b in "ABCDE":
-        w(f"  {{ {xf(f'inventory/Items/Bottle {b}')}, {int(extra[f'inventory/Bottles/Bottle {b} available']['hash'], 16):#010x}, "
-          f"{int(extra[f'inventory/Bottles/Bottle {b} contents']['hash'], 16):#010x} }},")
-    w("};")
-    choices = extra["inventory/Bottles/Bottle A contents"]["choices"]
-    w("const char *const data_bottle_names[] = { " + ", ".join(c(l.lower()) for _, l in choices) + " };")
-    w("const uint32_t data_bottle_values[] = { " + ", ".join(f"{v:#010x}" for v, _ in choices) + " };")
-    w("const uint32_t data_bottle_acquired[] = { " + ", ".join(acq(BOTTLE_ACQ.get(l, "")) for _, l in choices) + " };")
-    w(f"const int data_n_bottle_contents = {len(choices)};")
-    w(f"const uint32_t data_acquired_bottle = {acq('Bottle')};\n")
-
-    st = extra["link/Abilities/Strength"]
-    w(f"const field_t data_strength = {xf('link/Abilities/Strength')};")
-    w("const uint32_t data_strength_values[4] = { " + ", ".join(f"{v:#010x}" for v, _ in st["choices"]) + " };")
-    w(f"const field_t data_diving_depth = {xf('link/Abilities/Diving depth')};")
-    w("const float data_scale_depths[3] = { 3.0f, 6.0f, 9.0f };\n")
-
-    quests = sorted(story["quests"].items(), key=lambda x: quest_label(x[1]["name"]))
-    for i, (h, q) in enumerate(quests):
-        w(f"static const char *const stages_{i}[] = {{ " + ", ".join(c(s) for s in q["stages"]) + " };")
-    w("const quest_t data_quests[] = {")
-    for i, (h, q) in enumerate(quests):
-        w(f"  {{ {c(quest_label(q['name']))}, {int(h, 16):#010x}, {len(q['stages'])}, stages_{i} }},")
-    w("};\nconst int data_n_quests = sizeof(data_quests) / sizeof(*data_quests);\n")
-    guides = story["action_guides"]
-    w("const uint32_t data_action_guides[] = { " + ", ".join(f"{int(v, 16):#010x}" for v in guides.values()) + " };")
-    w("const int data_n_action_guides = sizeof(data_action_guides) / sizeof(*data_action_guides);")
-    w(f"const uint32_t data_action_guide_navi = {int(guides['Navi'], 16):#010x};\n")
-
-    w("const char *const data_warp_categories[WC_COUNT] = { " + ", ".join(c(x) for x in CATEGORIES) + " };")
-    spawns, maps = [], []
-    for cat in range(len(CATEGORIES)):
-        for name in sorted((n for n in warps["spawns"] if category(n) == cat), key=pretty):
-            first = len(spawns)
-            for pos, event, src in warps["spawns"][name]:
-                label = pretty(pos)
-                if pos in GATED_SPAWNS:
-                    label = f"{label} [needs {GATED_SPAWNS[pos]}]"
-                else:
-                    origin = pretty(src[5:]).split(" (")[0] if src.startswith("from ") else ""
-                    if origin and origin != label:
-                        label = f"{label} (from {origin})"
-                spawns.append((label, pos, event, int(bool(starters.get(name, {}).get(pos)))))
-            maps.append((name, map_label(name), cat, int(name in DUNGEONS), first, len(spawns) - first))
-    w("const warp_map_t data_warp_maps[] = {")
-    for name, lbl, cat, dun, first, n in maps:
-        w(f"  {{ {c(name)}, {c(lbl)}, {cat}, {dun}, {first}, {n} }},")
-    w("};\nconst int data_n_warp_maps = sizeof(data_warp_maps) / sizeof(*data_warp_maps);\n")
-    w("const spawn_t data_spawns[] = {")
-    for lbl, pos, event, starter in spawns:
-        w(f"  {{ {c(lbl)}, {c(pos)}, {c(event)}, {starter} }},")
-    w("};\nconst int data_n_spawns = sizeof(data_spawns) / sizeof(*data_spawns);")
-
-    # air walls (airwalls.json, from tools/airwalls.py): per map, walls with their shapes
-    aw = json.loads((ROOT / "data" / "airwalls.json").read_text(encoding="utf-8"))["maps"]
-    blocks = {"HitOnlyPlayer", "Default", None}  # airwall.py PLAYER_MASKS
-    w("")
-    w("const airshape_t data_airshapes[] = {")
-    walls, amaps, nshape = [], [], 0
-    for name in sorted(aw):
-        first = len(walls)
-        for d in aw[name]:
-            f0 = nshape
-            for sh in d["shapes"]:
-                if sh["type"] == "box":
-                    a3, b3, r = sh["center"], sh["half"], 0.0
-                else:
-                    a3, b3, r = sh["a"], sh["b"], sh["radius"]
-                w(f"  {{ {0 if sh['type'] == 'box' else 1}, {{ {fl(a3[0])}, {fl(a3[1])}, {fl(a3[2])} }}, "
-                  f"{{ {fl(b3[0])}, {fl(b3[1])}, {fl(b3[2])} }}, {fl(r)} }},")
-                nshape += 1
-            walls.append((d["t"], d["r"], d["s"], f0, nshape - f0, 0 if d.get("mask") in blocks else 1))
-        amaps.append((name, first, len(walls) - first))
-    w("};")
-    w("const airwall_t data_airwalls[] = {")
-    for t, r, sc, f0, n, kind in walls:
-        w(f"  {{ {{ {fl(t[0])}, {fl(t[1])}, {fl(t[2])} }}, {{ {fl(r[0])}, {fl(r[1])}, {fl(r[2])} }}, "
-          f"{{ {fl(sc[0])}, {fl(sc[1])}, {fl(sc[2])} }}, {f0}, {n}, {kind} }},")
-    w("};")
-    w("const airmap_t data_airmaps[] = {")
-    for name, first, n in amaps:
-        w(f"  {{ {c(name)}, {first}, {n} }},")
-    w("};\nconst int data_n_airmaps = sizeof(data_airmaps) / sizeof(*data_airmaps);")
-
-    missing = [t for k, t in ITEM_SCREEN if k in ("owned",) and t not in F] + [t for t in GEAR if t not in F]
+    missing = [title for kind, title in ITEM_SCREEN if kind in ("owned",) and title not in out.fields]
+    missing += [title for title in GEAR if title not in out.fields]
     if missing:
         sys.exit(f"missing fields: {missing}")
-    (ROOT / "src/ootgz/data.c").write_text("\n".join(out) + "\n", encoding="utf-8")
+    (ROOT / "src/ootgz/data.c").write_text("\n".join(out.lines) + "\n", encoding="utf-8")
     print(f"src/ootgz/data.c: {len(maps)} maps, {len(spawns)} spawns, {len(quests)} quests, "
-          f"{len(walls)} air walls in {len(amaps)} maps")
+          f"{len(walls)} air walls in {len(airwall_maps)} maps")
 
 
 if __name__ == "__main__":

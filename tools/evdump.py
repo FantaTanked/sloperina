@@ -5,35 +5,46 @@
 import sys
 import evfl
 
+# actions that only change what is seen or heard: left out unless --all
 VISUAL = ("PlayAS", "Camera", "Fade", "LookAt", "DoF", "Lod", "Sound", "Emotion", "Shading", "Foliage",
           "Palette", "ModelBind", "Offstage", "Warp", "Wait", "Comment", "Participate", "Turn", "Voice",
           "Graphics", "Effect", "Rumble", "Light", "ScreenShot", "Blur")
 
 
+def _value(holder, attribute):
+    """holder.attribute.v, or None where either is missing (evfl wraps references in objects with .v)."""
+    return getattr(getattr(holder, attribute, None), "v", None)
+
+
 def events(path):
-    f = evfl.EventFlow()
-    f.read(open(path, "rb").read())
-    fc = f.flowchart
-    for e in fc.events:
-        d = e.data
-        kind = type(d).__name__
-        actor = getattr(getattr(d, "actor", None), "v", None)
-        act = getattr(getattr(d, "actor_action", None), "v", None) or getattr(getattr(d, "actor_query", None), "v", None)
-        params = dict(d.params.data) if getattr(d, "params", None) else {}
-        sub = getattr(d, "res_flowchart_name", "") + ("/" + d.entry_point_name if getattr(d, "entry_point_name", "") else "")
-        yield fc.name, e.name, kind, (str(actor.identifier) if actor else ""), (act.v if act else ""), params, sub
+    """(flowchart, event name, event kind, actor, action or query, parameters, sub-flow) for each event."""
+    flow = evfl.EventFlow()
+    flow.read(open(path, "rb").read())
+    flowchart = flow.flowchart
+    for event in flowchart.events:
+        data = event.data
+        kind = type(data).__name__
+        actor = _value(data, "actor")
+        action = _value(data, "actor_action") or _value(data, "actor_query")
+        params = dict(data.params.data) if getattr(data, "params", None) else {}
+        sub_flow = getattr(data, "res_flowchart_name", "")
+        if getattr(data, "entry_point_name", ""):
+            sub_flow += "/" + data.entry_point_name
+        yield (flowchart.name, event.name, kind, (str(actor.identifier) if actor else ""), (action.v if action else ""),
+               params, sub_flow)
 
 
 def main():
-    every = "--all" in sys.argv
-    for p in [a for a in sys.argv[1:] if not a.startswith("--")]:
-        for fl, name, kind, actor, act, params, sub in events(p):
-            if not every and kind == "ActionEvent" and any(v in act for v in VISUAL):
+    show_all = "--all" in sys.argv
+    for path in [arg for arg in sys.argv[1:] if not arg.startswith("--")]:
+        for flowchart, name, kind, actor, action, params, sub_flow in events(path):
+            if not show_all and kind == "ActionEvent" and any(word in action for word in VISUAL):
                 continue
             if kind in ("ForkEvent", "JoinEvent"):
                 continue
-            ps = ", ".join(f"{k}={v}" for k, v in params.items())
-            print(f"{fl}:{name:<10} {kind[:-5]:<8} {actor}.{act}({ps}) {sub}".rstrip())
+            param_list = ", ".join(f"{key}={value}" for key, value in params.items())
+            # kind[:-5]: without "Event"
+            print(f"{flowchart}:{name:<10} {kind[:-5]:<8} {actor}.{action}({param_list}) {sub_flow}".rstrip())
 
 
 if __name__ == "__main__":

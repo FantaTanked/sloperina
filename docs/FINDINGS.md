@@ -24,6 +24,7 @@ field name (`gamedata.murmur3`). "The patch" is ootmenu's code patch (`patch.py`
 6. [Things that do not work](#6-things-that-do-not-work)
 7. [How to investigate](#7-how-to-investigate)
 8. [Open problems](#8-open-problems)
+9. [Leads: pausing, debug leftovers, scene managers](#9-leads-pausing-debug-leftovers-scene-managers)
 
 ---
 
@@ -41,6 +42,7 @@ field name (`gamedata.murmur3`). "The patch" is ootmenu's code patch (`patch.py`
   types and defaults) ships in the game: `romfs/GameData/GameDataList.Product.110.byml.zs`. Exported to
   `data/gamedata_fields.json`. About 4,600 names were recovered by hashing every string in the game's scripts and data;
   ~3,600 more fields have readable titles from the onif save editor (`data/all_fields.json`, mapped by diffing exports).
+  2,568 more names come from the game's memory (`data/memory_names.json`, see [Names from memory](#names-from-memory)).
 - GameData keeps a **type list** of `(type vtable, count, objects, hash table)` entries, one per field type. The
   hash table maps field hash → object index. Objects of one type are a fixed size apart:
   - Int / Float: 0x28 bytes, value at `+0x1C`, **copy at `+0x20`** (write both).
@@ -57,6 +59,65 @@ field name (`gamedata.murmur3`). "The patch" is ootmenu's code patch (`patch.py`
   separate fields named `Struct.Member`.
 - **BoolExp** fields are formulas the game evaluates (e.g. "quest at or past stage X"); they can't be written.
 - **Enum** values are hashes of choice names; the choices are in `data/gamedata_fields.json` (`"v"`).
+
+### Saved or not, and what resets a field
+- Every field object starts with the same header: `+0x00` its type's vtable, `+0x08` reset bits (u32), `+0x0C` a
+  byte that changes during play (state, not a setting), `+0x10` the **save file index** (s32): -1 = not saved,
+  0 = the save slot, 1 to 3 = other save files (`IsLastSelectedMQMode` is 3). Read from all 12,947 Bool, Int, UInt,
+  Float, Enum, Vector3 and String64 fields; the counts below were the same in two emulator sessions two days apart.
+  Struct, BoolExp, the arrays and the 64-bit types weren't read.
+- **Bit 0 of the reset bits looks like "cleared on an area change"**: it's on the gossip stone fairies
+  (`BlewOcarinaByGossipStone.GOSSIP_*`, one fairy per visit), battle states (`DekuScrubBrothers_IsBattle`) and
+  picked bomb flowers. Inferred from which fields have it, not tested. Bit 3 is on nearly everything, saved or not;
+  bits 1, 2, 4, 5 and 8 aren't understood.
+
+Bools by setting:
+
+| Reset bits | Save | Bools | Examples |
+|---|---|---|---|
+| 0x08 | 0 | 9338 | most progress: `IsGet.*`, `HavePlayedEvent.*` |
+| 0x08 | -1 | 444 | `ActionGuide_IsRequestOcarina` |
+| 0x18 | 0 | 341 | (unnamed; Ints with 0x18 are `DefeatedEnemyNum.*`) |
+| 0x09 | 0 | 288 | `DreamWorld_ArriveFromKakarikoVillage`, `DungeonWarp_Canceled` |
+| 0x09 | -1 | 185 | `DekuScrubBrothers_IsBattle` |
+| 0x01 | -1 | 128 | `Cow_IsGetMilkFromCow` |
+| 0x21 | -1 | 114 | `Npc_DekuTreeChild_GlassTruth` |
+| 0x120 | 0 | 102 | (unnamed) |
+| 0x19 | -1 | 100 | (unnamed) |
+| 0x108 | 0 | 52 | `FairySpiritAppear_HrlField_Note` |
+| 0x01 | 0 | 46 | `BlewOcarinaByGossipStone.GOSSIP_*` |
+| 0x00 | -1 | 35 | `Sequence_IsAlreadyResetForLoadSave`, `DebugParam.*` |
+| other | | 119 | |
+
+- **Saved to the slot and without bit 0 = progress**: 9,869 Bools, 1,119 Ints, 87 UInts, 83 Enums, 76 Floats,
+  29 String64s and 12 Vector3s. Checked at a gossip stone: `HavePlayedEvent.GossipStone_D_T` and
+  `HaveTalked_Special.GossipStone_Talk_Event3` are saved and kept, `GossipStone_NaviTalk_Temporary` isn't saved.
+  The play time counters `0xe573f564` and `0xe53eb6d1` (UInt, +1 a second) are saved too.
+- In `data/gamedata_fields.json`: `"r"` (reset bits) and `"s"` (save file index) for those fields. The save fields
+  reference shows them and has a **progress only** filter.
+- **Found by:** reading every object of the seven type sections from outside the game, grouping them by these
+  values and checking the groups against their names.
+
+### Names from memory
+- `data/memory_names.json` (`{hash: [name, type, grade]}`) adds 2,568 names. They're merged into
+  `data/gamedata_fields.json` (`"ns"` says where each came from; the reference shows it on hover), and
+  `tools/re64.py` reads the file after `rom_names.json`. With the ~4,600 from the game's files, 7,161 of the 14,997
+  fields are named.
+- **How they were found:** every identifier-like string in the running game's heap and in main (about 5 million)
+  hashed against the field hashes, plus the game's own patterns filled in with names seen in memory
+  (`IsGet.<item>`, `PouchData.<item>.StockNum`, `HavePlayedEvent.<event>`). Mostly `HavePlayedEvent.*` (about
+  2,100), then `PouchData.*`, `HavePlayedGetEvent.*` and `IsGet.*`.
+- **Grades:** *sure* = a whole string in main, or in a logic graph (AINB) or BYML file within 0x400 bytes of a
+  `GameData*` key (for `HavePlayedEvent.X`, a key ending in `EventName`); *likely* = a whole string in a logic graph
+  or BYML file, or a name made of words (8+ characters, two words) anywhere else. 98 are sure and 2,470 likely.
+  Short or random-looking matches (*unsure*) were left out.
+- **Chance matches:** with about 5 million strings against 15 thousand hashes, around 17 collisions are expected.
+  Three names in `rom_names.json` were collisions where memory had the real name, and `gamedata_fields.json` now has
+  the real ones: `0x4147bf54` `yuzN` is `MiniGame_Diving_ShilverScale_First`, `0xa385357f` `WMb:` is
+  `HavePlayedEvent.Npc_Hylia_040_Child_D_N`, `0x54b613cf` `XN1wJ` is `LakeHylia_OverlapSharkAppearArea`. These
+  still look like collisions, with no real name found yet: `zSA` (0x82daaab7), `lddC` (0x826db2f9), `6fwL`
+  (0xbc8e1794), `iDr4` (0x6310157c), `zsbm` (0x7594791b), `KQigA` (0xe4075522), `f3xXn` (0x833e9356), `kz5L`
+  (0xb42e40db), `mooona` (0xf0aad6fa).
 
 ### Save files
 - `%APPDATA%\eden\nand\user\save\0000000000000000\<user id>\0400486024DEC000\slot_NN\progress.sav`: from offset
@@ -472,6 +533,9 @@ Each of these was tried and verified not to help:
     every frame), and it comes after collision, so it can't respect walls anyway.
 - Zeroing actor `+0x3A0/+0x3A8` (the game's horizontal momentum) every ms while steering: Link went straight
   through the wall. The push-back is carried by that velocity.
+- Writing the `Sequence_*Pause*` GameData values (`GamePauseRequestCount` at 1 for 2 s, `PreGamePauseRequestCount`
+  at 1 for 20 s): nothing happens. They only keep count for the pause graphs (§9.1). **Don't leave one changed**
+  (debug > pause research can): at 1, the game's own pause screen and menus would skip their real pause request.
 
 ## 7. How to investigate
 
@@ -503,3 +567,125 @@ Each of these was tried and verified not to help:
 - Unticking an ocarina leaves `ActionGuide_IsEnd.Navi` set (the D-pad stays, empty).
 - Collision view (gz's): shelved. The collision files are decoded (`tools/phive.py`); the plan, costs and format
   are in [COLLISION.md](COLLISION.md).
+- Frame advance freezes the picture while paused (MANUAL §7). The game's own pause is a request count in the pause
+  manager, and one type stops the world while the game keeps drawing (§9.1).
+- Leads in §9 not followed up yet: a player debug move state that may survive (levitate without searching for the
+  physics record), the game's own debug line and triangle shaders (collision view, stage 2), and the scene's
+  managers (a Link state name, the exit Link is nearest to, the map's collision, the explored room after a warp).
+
+## 9. Leads: pausing, debug leftovers, scene managers
+
+Found from outside the game (memory reads and test writes in Lichii, static analysis of main) and not used by
+sloperinaGZ yet. Same build as everything else here.
+
+### 9.1 Pausing: the pause manager
+- **The `Sequence_*Pause*` values only keep count.** Opening the map (Minus) or the pause screen (Plus) sets
+  `PreGamePauseRequestCount` and `IsPreGamePause` to 1, about 60 ms later `GamePauseRequestCount` and `IsPause` to 1
+  with the pre request back to 0; closing puts both back to 0 with a one-frame `PostGamePauseRequestCount` and
+  `IsPostGamePause`. A dialogue changes none of them. They belong to the sequence graphs `ChangeGamePause.module`,
+  `ChangePreGamePause.module` and `ChangePostGamePause.module`: on input `IsPause` they add or take 1 from the count,
+  at 1 run `SeqOneShotRequestPause` with `PauseType` `GamePause`, back at 0 `SeqOneShotReleasePause`, and below 0
+  raise an app error ("[Seq]GamePause underflow, please report"). Callers: `GamePauseOn`/`Off`,
+  `PlusMinusPauseOff`, `OcarinaPauseOn`/`Off`, `ShortCutPauseOn`/`Off`.
+- **The pause manager** is `*[main+0x4e97e38]`: `+0x00` the number of pause types (20), `+0x08` the type table,
+  sorted by ID, 0x20 bytes per type: `+0x00` name, `+0x08` ID (MurmurHash3 of the name), `+0x0C` and `+0x10`
+  bitmasks (probably what the type stops), `+0x1C` the request count (bit 31 is a separate flag; keep it). `+0x48`
+  is a listener whose notify function (`main+0xafba60`) is an empty `ret`.
+- `SeqOneShotRequestPause` (vtable `main+0x4c6e208`, work in slot 39 at `main+0x3bb4260`) turns `PauseType` into an
+  ID and calls `main+0xafb980`, which finds the type, adds 1 to its count atomically and notifies the listener.
+  Release is the next function, `main+0xafba70`. So a pause is just a count above 0, and raising one from outside the
+  game works like the game's own request. From inside, those two functions are the ones to call (their arguments
+  weren't traced).
+- The 20 types: `ResetGimmickFromScript`, `LoadingPause`, `UpdateBancResource`, `DebugPause`, `SceneBeginning`,
+  `EventPlayMovie`, `EventDisableController_Camera`, `EventSetupOrRestore`, `WarpPause`, `PostGamePause`,
+  `SystemPauseWhileLoading`, `UpdateResourcePause`, `EventBancChangePause`, `ResetGimmick`, `PreGamePause`,
+  `GameOverPause`, `GamePause`, `EventDisableController`, `SceneTransition`, `ClickPause`. IDs: `GamePause`
+  `0xba597383`, `EventDisableController` `0xd468c7d1`, `EventDisableController_Camera` `0x5cf23aab`, `DebugPause`
+  `0x2d67e2da`, `ClickPause` `0xfbad2d6a`.
+- **Tested in Lichii**, a count raised to 1 from outside and back to 0:
+  - `EventDisableController`: Link ignores the controller while the world keeps moving (gz's menu behaviour). It
+    was raised and lowered for each of 16 menu opens in one session, while the game's own events raised and lowered
+    it too, with no trouble.
+  - `GamePause`: everything stops like the pause screen and the game keeps drawing, but some objects disappear while
+    it lasts (the game's pause screen hides that behind a captured picture).
+- For frame advance (§8): `GamePause` stops the world without stopping the picture, with the missing objects as the
+  catch. `DebugPause` and `ClickPause` look like debug leftovers and haven't been tried; either may be the
+  developers' own stop.
+
+### 9.2 Debug leftovers
+A name in main doesn't mean the feature still works: release builds keep the names of registered nodes and
+parameters while the code behind them is compiled out.
+- **Scene selector: almost certainly compiled out.** RomConfig (`sInstance` at `main+0x4e97e60`) is filled from
+  `System/RomConfig/%s%s` (`main+0x3bc1230`) and `System/GameRomConfig/%s%s` (`main+0x9b9a90`), with the build name
+  picked from `Debug`, `Develop`, `Pilot` and `Product` by an index hard-coded to 3 (Product). The reader
+  (`main+0x9b9de0`) stores `BootupScene` (+0x8) and `UseSceneSelector` (a byte at +0x118). The reflection type's
+  constructor defaults `UseSceneSelector` to 1 and the Product config sets 0, but nothing reads +0x118: the boot only
+  checks whether `BootupScene` is empty (scene manager init `main+0x3ba9fb0`, update `main+0x3baa670`), and no
+  string names a scene select screen. Not checked: whether romfs also holds Debug or Develop RomConfig files.
+- **Debug drawing: the game side is compiled out, the renderer side isn't.**
+  - Every `ExecuteDebugDraw*` and `ExecuteDebugEntry*` node keeps its parameter list, but its per-frame method is a
+    bare `ret` (`ExecuteDebugDrawBox`, slot 29; the same for `DrawSphere`, `EntryCapsule`, `EntrySphere`, `AppLog`
+    and others).
+  - `ExecuteDebugEntryRigidBodyShape` still has a body. It asks `main+0x38bb7b0` to draw each `RigidBodyConst`,
+    `RigidBodyEntity` and `RigidBodySensor`, which loads the physics object `X` (`*(*(main+0x4c7df00))`, then
+    `+0xC0`) and returns at once if `X+0xE0`, the debug draw manager, is null. It always is: the physics setup
+    (`main+0x1206010`) creates X's members at +0xD8 and +0xE8 to +0x108 but nothing at +0xE0.
+  - Still there: the render layer table (`main+0x4c0bab0`: `CalcView`, `CalcGPU`, `BG`, `Opa(Debug)`, `Opa`, `Xlu`,
+    `Xlu(Debug)`, `PostEffect`, `DebugInfo`, `FinalImage`, `Text(Debug)`) and the system shader list
+    (`main+0x4c04608`: `debug_primitive`, `debug_shape_instanced`, `debug_point_instanced`, `debug_line_instanced`,
+    `debug_triangle_instanced`, `debug_colored_mesh`). These are the candidates for COLLISION.md's stage 2, route 1
+    (a shader the game has already built). Whether they're loaded at run time wasn't checked.
+  - `phive_debug_draw` is the water simulation's height field view, not collision. Havok's Visual Debugger viewers
+    (`hknpShapeViewer`, `hknpBroadPhaseViewer` and others) are linked in; whether the VDB server starts wasn't
+    checked.
+- **Player debug move: may survive.** `ExecutePlayerDebugMove` and `ExecutePlayerSubDebugMove` are registered
+  nodes, and Link's behaviour tree has `SelectorPlayerSchedulerDebug` and `SelectorPlayerSubSchedulerDebugMove`.
+  Unlike the draw nodes, `ExecutePlayerDebugMove` isn't empty: slot 29 (`main+0x27d3e60`) follows `[this+8]`,
+  `+0x8`, `+0x1F0`, `+0x270`, `+0x358` to a player component and calls `main+0x933270` on it with request 0xF. Not
+  traced further. From inside the game it can simply be tried; if it's a free-move state, it's a levitate that
+  doesn't need Link's physics record (§5.19).
+- Other names: `FocusDebugCamera` (compared as a command name at `main+0x3b54b34`); the scene parameters
+  `DebugBootScript`, `IsChildWhenChangeBanc` and `IsForceSwitchChildOrAdult`; the rendering switches
+  `dev_colorization`, `dev_scope_draw`, `dev_color_bars`, `dev_lkt_ui` and `tera_develop`;
+  `SeqExecuteResetGameDataAllForDebug`; `engine__debug__ClickMenu` (no references). Not found: anything named cheat,
+  noclip, god mode, level or stage select, or ImGui.
+
+### 9.3 The scene's managers
+`S = *[*[main+0x4e97648]+0x1F0]` (the scene manager's current scene) holds 41 component pointers at `*[S+0x58]`
+(count at `S+0x50`). Each component's vtable has a name getter (`adrp x0; add x0; ret`) among its first 24 slots.
+Read in Kokiri Forest:
+
+| Entry (offset) | Component | Entry (offset) | Component |
+|---|---|---|---|
+| 0 (+0x000) | Sequence (`FormalSequence.root`) | 22 (+0x0B0) | WarpMgr |
+| 5 (+0x028) | PlayingInfoMgr | 23 (+0x0B8) | OptimizeChangeBancMgr |
+| 6 (+0x030) | GlobalGameParameterTable | 24 (+0x0C0) | SystemCullingMgr |
+| 7 (+0x038) | BancLoadMgr | 25 (+0x0C8) | DropMgr |
+| 8 (+0x040) | LocationMgr | 26 (+0x0D0) | LimiterActorCountMgr |
+| 9 (+0x048) | NavMeshMgr | 27 (+0x0D8) | CompoundNavMeshObjectMgr |
+| 10 (+0x050) | StaticCompoundBodyMgr | 28 (+0x0E0) | GameSafetyMgr |
+| 11 (+0x058) | PhiveVolumeStatsMgr | 29 (+0x0E8) | AreaCullingMgr |
+| 12 (+0x060) | AutoSaveMgr | 30 (+0x0F0) | RouteRailMgr |
+| 13 (+0x068) | LoadProgressMgr | 31 (+0x0F8) | DungeonMgr |
+| 15 (+0x078) | ResidentActorMgr | 32 (+0x100) | OcarinaMgr |
+| 16 (+0x080) | BakeLoadMgr | 33 (+0x108) | OcarinaCreationMgr |
+| 17 (+0x088) | OwnedHorseMgr | 34 (+0x110) | NaviMgr |
+| 18 (+0x090) | MinigameMgr | 36 (+0x120) | NpcMgr |
+| 19 (+0x098) | TimerMgr | 37 (+0x128) | AgonyStoneTargetMgr |
+| 20 (+0x0A0) | LoadingPauseMgr | 38 (+0x130) | FoliageLoadMgr |
+| 21 (+0x0A8) | AmiiboMgr | 39 (+0x138) | EventSubstituteStarterMgr |
+
+Entries 1 to 4 and 14 were empty; 35 and 40 had no name getter.
+
+- **NaviMgr keeps a copy of Link's transform** every frame for Navi (the game's `QueryNaviGetPlayerPosAndRot`
+  reads it): a row-major 3x3 rotation at +0x894 (yaw = atan2(+0x89C, +0x8B4)), the root position (his feet) at
+  +0x8B8, the position at +0x8D0 and the velocity in units per second at +0x8DC. The chain held through loading
+  zones, a death, the title screen and a game reboot. It's only a copy: writing it doesn't move Link.
+- Leads, not followed up:
+  - AutoSaveMgr `+0x1DC` holds a short name that follows what Link is doing: `Move`, `Wait`, `EvtTalk`, `EvtWait`,
+    `EvtLookAroundAttention`. A start for a Link state watch.
+  - WarpMgr (`+0x170`, a flag at `+0x148`) and OptimizeChangeBancMgr (`+0x80`) hold the destination of the exit Link
+    is nearest to; in the Lost Woods they switched between `GoronCity_Child`, `KokiriForest_Child` and
+    `LostWood_Child` as he walked.
+  - StaticCompoundBodyMgr is the obvious place to look for the map's collision in memory (COLLISION.md, "the
+    unknowns"), and DungeonMgr for the explored room a menu warp leaves unset (§8).

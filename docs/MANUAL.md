@@ -68,7 +68,7 @@ With the menu closed:
 | **R + A + D-pad left** | Start / stop the timer |
 | **R + B + D-pad left** | Reset the timer |
 | **R + B + D-pad right** | Reset the lag counter |
-| **R + A + D-pad right** | Reset the jump height watch to **none** (as after a load) |
+| **R + A + D-pad right** | Reset **JS Height** to FLT_MAX (as after a load: the jumpslash then works at any height) |
 | **R + D-pad up** | Save position: where Link is and which way he faces |
 | **R + D-pad down** | Load position: put Link back there (same map only) |
 | **L3** | Levitate on / off (if enabled, [2.10.2](#2102-levitate)) |
@@ -180,8 +180,9 @@ row of buttons:
 Under the list:
 
 - **📁 (known watches)**: the built-in watches: x, y, z, facing, move angle, speed, y speed, camera angle /
-  pitch / distance, input, stick, lag, timer, frame, map, air wall, jump height. Each can be in the list once.
-  **jump height** is the height your last jump set (takeoff + 0.7; **none** until you jump after a load).
+  pitch / distance, input, stick, lag, timer, frame, map, air wall, JS Height. Each can be in the list once.
+  **JS Height** is the height your last jump set (takeoff + 0.7; FLT_MAX until you jump after a load), which
+  the jumpslash launch is limited to. It's always in the list (hide it to keep it off screen).
 - **+ (custom watch)**: a watch of any memory address. Type the address (D-pad left / right: digit, up / down:
   change it), **L** to add. It starts from your last memory watch, as in gz. One watch per address.
 
@@ -189,7 +190,7 @@ Under the list:
 Angles: **deg**, **hex** (the game's 16-bit angle, 0x4000 = 90°), **s16**, **rad**. Counters: **dec**, **hex**.
 Timer: **m:s**, **sec**. Stick: **%**, **raw**. Memory watches: **u8 s8 x8 u16 s16 x16 u32 s32 x32 f32 x64**.
 
-**timer**: **start/stop timer**, **reset timer**, **reset lag counter**, **reset jump height** (back to **none**, as
+**timer**: **start/stop timer**, **reset timer**, **reset lag counter**, **reset JS Height** (back to FLT_MAX, as
 after a load) (also shortcuts, [1.3](#13-shortcuts-in-the-game)).
 
 **The keyboard** (renaming): the text line at the top (D-pad left / right moves the cursor, **L** finishes), then
