@@ -3,11 +3,12 @@
 #include "gamedata.h"
 #include "link.h"
 #include "sys.h"
+#include "watches.h"
 #include "z64hd.h"
 
 const char *const cheat_names[CHEAT_COUNT] = {
   "energy", "rupees", "magic", "deku sticks", "deku nuts", "deku seeds", "bombs", "arrows",
-  "bombchus", "magic beans", "2x movement speed",
+  "bombchus", "magic beans", "2x movement speed", "walk through walls", "lock JS height",
 };
 bool cheats[CHEAT_COUNT];
 
@@ -86,8 +87,35 @@ void magic_set(int32_t value)
   gd_set_int(HASH_MAGIC, value);
 }
 
+/* Lock JS height: the value when it was ticked (or the first one readable after), written back every
+ * frame. Kept across area changes, where the pointers move. */
+static bool js_height_held;
+static uint32_t js_height_bits;
+
+static void lock_js_height(void)
+{
+  uintptr_t addr;
+  if (!cheats[CHEAT_JS_HEIGHT]) {
+    js_height_held = false;
+    return;
+  }
+  if (!js_height_address(&addr) || (addr & 3) || !sys_mapped(addr, 4, SYS_PERM_R | SYS_PERM_W))
+    return;
+  volatile uint32_t *value = (volatile uint32_t *)addr;
+  if (!js_height_held) {
+    js_height_bits = *value;
+    js_height_held = true;
+    float f;
+    memcpy(&f, &js_height_bits, sizeof(f));
+    log_printf("cheats: JS height locked at %.9g", (double)f);
+  }
+  if (*value != js_height_bits)
+    *value = js_height_bits;
+}
+
 void cheats_frame(void)
 {
+  lock_js_height();
   if (!gd_ready())
     return;
   if (cheats[CHEAT_ENERGY]) {

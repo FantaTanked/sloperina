@@ -506,19 +506,13 @@ static void add_edge_dots(aw_dot_t *out, int *n, const cam_t *cam, const float a
 
 /* --- hidden while the game is paused ------------------------------------------------------------- */
 
-/* The game's own pause state (see debug > pause research). Frame advance holds the game without
- * setting these, so the walls still show while frame advancing. */
-#define GD_SEQUENCE_IS_PAUSE 0x604AEBE1u                   /* Sequence_IsPause (bool) */
-#define GD_SEQUENCE_GAME_PAUSE_REQUEST_COUNT 0x64A61098u   /* Sequence_GamePauseRequestCount (int) */
-
-/* True while the game shows its pause screen or an item menu, where the walls would draw over it. */
+/* True while the game shows its pause screen or an item menu, where the walls would draw over it.
+ * Frame advance doesn't count (see debug > pause research), so the walls still show while advancing. */
 static bool game_is_paused(void)
 {
-  bool is_pause = false;
-  int32_t pause_requests = 0;
-  gd_get_bool(GD_SEQUENCE_IS_PAUSE, &is_pause);
-  gd_get_int(GD_SEQUENCE_GAME_PAUSE_REQUEST_COUNT, &pause_requests);
-  bool paused = is_pause || pause_requests > 0;
+  bool is_pause;
+  int32_t pause_requests;
+  bool paused = gd_game_paused(&is_pause, &pause_requests);
 
   /* Log each change, with both values, so it can be checked which one the game's menus set. */
   static bool was_paused;

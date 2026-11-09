@@ -50,4 +50,9 @@ const char *gd_get_str(int idx);           /* NULL if not found */
 bool        gd_set_str(int idx, const char *s);
 int         gd_str_index(uint32_t hash);   /* a String64 field's index by name hash, or -1 */
 
+/* The game's own pause (its pause screen or an item menu): Sequence_IsPause, or a pause request
+ * counted in Sequence_GamePauseRequestCount. Frame advance holds the game without setting either.
+ * Either out pointer may be 0. */
+bool        gd_game_paused(bool *is_pause, int32_t *pause_requests);
+
 #endif

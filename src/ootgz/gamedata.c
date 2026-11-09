@@ -303,3 +303,21 @@ int gd_str_index(uint32_t hash)
   uint32_t *pair = gd_lookup(str_type, hash);
   return pair && pair[1] < str_type->count ? (int)pair[1] : -1;
 }
+
+/* --- the game's pause ---------------------------------------------------------------------------- */
+
+#define GD_SEQUENCE_IS_PAUSE 0x604AEBE1u                   /* Sequence_IsPause (bool) */
+#define GD_SEQUENCE_GAME_PAUSE_REQUEST_COUNT 0x64A61098u   /* Sequence_GamePauseRequestCount (int) */
+
+bool gd_game_paused(bool *is_pause, int32_t *pause_requests)
+{
+  bool pause = false;
+  int32_t requests = 0;
+  gd_get_bool(GD_SEQUENCE_IS_PAUSE, &pause);
+  gd_get_int(GD_SEQUENCE_GAME_PAUSE_REQUEST_COUNT, &requests);
+  if (is_pause)
+    *is_pause = pause;
+  if (pause_requests)
+    *pause_requests = requests;
+  return pause || requests > 0;
+}

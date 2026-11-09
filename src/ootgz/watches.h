@@ -45,6 +45,8 @@ void watch_entry_set_type(int index, int type);
 /* where the value is in memory, for the wrench (debug > memory): the built-in watches that read one
  * value (position, facing, y speed, camera, frame, map) and memory watches */
 bool watch_entry_has_address(const watch_entry_t *e);
+/* JS Height's f32: [[link_actor() + 0x270] + 0x358] + 0x18E8 (false while a pointer is missing) */
+bool js_height_address(uintptr_t *addr);
 bool watch_entry_address(const watch_entry_t *e, uintptr_t *addr, int *mw_type);
 void watch_move(int index, int dir);              /* up (-1) or down (+1) the list */
 void watch_set_label(int index, const char *label); /* "" = its own name again */

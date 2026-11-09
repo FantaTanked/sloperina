@@ -562,6 +562,23 @@ Each of these was tried and verified not to help:
 - Warping into a dungeon doesn't register the current room, so the map screen shows "???" until you walk through a
   door.
 - Upgrades other than the wallet are wired up (§5.7) but not yet confirmed in game.
+- Walk through walls (cheats > player) works in SacredForestMeadow_Child (confirmed in game, 9th November 2026);
+  not yet tried elsewhere (dungeons, doors, air walls). What led there, tested at a rock wall at about
+  (8.56, 119.94, -105.41) in the physics record:
+  - Writing Link's x/z each frame doesn't get him through: the game puts the record back at exactly the same spot
+    at the wall every frame. Levitate's "through walls" fails at the same wall: its writes took every other frame
+    for about 0.2 s, then not at all (not even the height).
+  - Against a wall his requested velocity (record `+0x24`) drops from about 4.4 units/s at a run to 0.1-0.5.
+  - Floors there are on the same layers as the walls (mostly GroundHighRes grass; `phive.py map`), so switching off
+    Link's collision with those layers would drop him through the floor.
+  The cheat now switches off Link's collision with GroundObject, GroundHighRes(Smooth/Rough) and GroundStaticTree
+  in the game's layer table (`layers.c`) while it walks him through, and holds his height meanwhile. The game reads
+  that table at run time: with the bits cleared, the record follows the cheat's writes, and Link's logged path
+  crossed about 30 GroundHighRes wall faces (wood, stone, steep grass). The heap holds 4 copies (2 of each mask
+  array); searching for them all at once held the game for 21 s, so `layers.c` searches 8 MiB per frame from the
+  moment the cheat is ticked. The table: PhiveConfig's
+  `LayerEntityFilterTable` (22 x 22, values 0/1/2) is read at boot by `main+0xca326c` into two arrays of 22 u64
+  masks per table (bit per layer hit: entries 1 or 2, and entries 2). Both are symmetric. Player is layer 3.
 - Count items (sticks, nuts, bombs, bombchus, beans), bottles and masks aren't cleared from item buttons when
   removed.
 - Unticking an ocarina leaves `ActionGuide_IsEnd.Navi` set (the D-pad stays, empty).

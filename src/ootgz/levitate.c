@@ -14,12 +14,21 @@
  * moment so we stop pushing into it (FINDINGS §5.10). "through walls" skips all of that.
  *
  * 2x speed: while Link walks or runs on the stick, add the distance the game moved him this frame
- * again (the game's collision still pushes him back out of walls). */
+ * again (the game's collision still pushes him back out of walls).
+ *
+ * Walk through walls: once the stick has pushed Link the same way for a moment while he barely moves,
+ * his collision with the ground and wall layers is switched off (layers.c) and he's walked on that way
+ * (relative to the camera, as levitate steers) at his running speed and at the height he was at, until
+ * the stick is let go or turned; then his collision comes back. Moving him by position alone doesn't
+ * work: the game's collision puts him back at the wall every frame (FINDINGS §8). Floors are on the
+ * same layers as walls, hence the held height. */
 #include "levitate.h"
 
 #include "cheats.h"
+#include "gamedata.h"
 #include "gfx.h"
 #include "input.h"
+#include "layers.h"
 #include "link.h"
 #include "sys.h"
 #include "z64hd.h"
@@ -59,11 +68,16 @@ int levitate_move_speed = 6;  /* stick, units/s */
 #define STILL_SPEED 0.05        /* below this Link isn't moving (and keeps his heading) */
 #define TINY_VELOCITY 0.01      /* the velocity written when he isn't moving, so he keeps facing */
 #define SPEED_MAX_STEP_SQ 4.0   /* 2x speed: a bigger move (squared) is a warp or a respawn */
+#define RUN_SPEED 4.4           /* units/s: Link's full-tilt run (the requested velocity mid-run) */
+#define HELD_BACK 0.3           /* walls: asking for and moving at under this much of the stick's speed */
+#define HELD_BACK_TIME 0.2      /* s held back, stick steady, before he's walked on through */
+#define FREE_AGAIN 0.8          /* walls: the game asking for this much of the stick's speed hands him back */
 #define MAX_DT 0.1              /* s: longer frames count as this */
 #define STICK_DEAD 7849
 #define STICK_MAX 32767.0
 #define FLOAT_TRACE_FRAMES 40   /* frames of each float that are logged */
 #define SPEED_TRACE_FRAMES 12   /* frames of 2x speed that are logged (once) */
+#define WALLS_TRACE_FRAMES 24   /* frames of walking through a wall that are logged (each time) */
 
 #define MEMORY_TYPE_MASK 0xFF
 #define MEMORY_TYPE_NORMAL 0x05 /* ordinary heap memory */
@@ -614,6 +628,136 @@ static void speed_step(void)
   speed_known = true;
 }
 
+/* --- walk through walls --------------------------------------------------------------------------- */
+
+static bool walls_known;
+static double walls_x, walls_z;  /* where Link was (or we put him) last frame */
+static bool walls_wrote;         /* we moved him last frame */
+static vec3f_t walls_drawn;      /* his drawn position last frame */
+static double walls_dir_x, walls_dir_z; /* the way the stick pushed last frame */
+static double held_back_for;     /* s the game has been holding him back */
+static bool walking_through;     /* we're walking him on */
+static bool phasing;             /* and his collision with the ground and wall layers is off */
+static double phase_y;           /* the height he's held at meanwhile */
+static int walls_trace;          /* frames logged since he started walking through */
+
+/* The game didn't run last frame (the emulator paused, frame advance holding): it neither touched the
+ * position we wrote nor redrew Link there. Without this, a held stick would carry him on. */
+static bool walls_frozen(double cx, double cz, vec3f_t drawn)
+{
+  return walls_wrote && cx == walls_x && cz == walls_z && drawn.x == walls_drawn.x && drawn.y == walls_drawn.y &&
+         drawn.z == walls_drawn.z;
+}
+
+/* Where the stick pushes, on the ground relative to the camera: a unit (x, z) and how far (0..1). */
+static bool stick_way(double *ux, double *uz, double *tilt)
+{
+  double sx, sy, fx, fz;
+  stick(&sx, &sy);
+  *tilt = hypotf((float)sx, (float)sy);
+  if (*tilt <= 0 || !camera_forward(&fx, &fz))
+    return false;
+  double rx = -fz, rz = fx; /* camera's right */
+  *ux = (fx * sy + rx * sx) / *tilt;
+  *uz = (fz * sy + rz * sx) / *tilt;
+  return true;
+}
+
+/* Hand Link back to the game (logged by the caller when walking_through was set). */
+static void walls_stop(void)
+{
+  walking_through = false;
+  held_back_for = 0;
+  if (phasing) {
+    layers_player_hits_ground(true);
+    phasing = false;
+  }
+}
+
+static void walls_step(double dt, bool double_speed)
+{
+  volatile double *pos = (volatile double *)record;
+  const volatile float *requested = (const volatile float *)(record + RECORD_REQUESTED_VEL); /* z, x, y */
+  double cx = pos[0], cz = pos[2];
+  vec3f_t drawn;
+  link_drawn_pos(&drawn);
+  if (walls_frozen(cx, cz, drawn) || gd_game_paused(0, 0))
+    return; /* keep where we put him, for when the game runs again */
+  walls_drawn = drawn;
+  walls_wrote = false;
+
+  double ux, uz, tilt;
+  double game_dx = cx - walls_x, game_dz = cz - walls_z; /* how the game moved him since last frame */
+  bool steering = stick_way(&ux, &uz, &tilt);
+  bool same_dir = steering && same_way(ux, uz, walls_dir_x, walls_dir_z);
+  bool warped = game_dx * game_dx + game_dz * game_dz >= SPEED_MAX_STEP_SQ; /* or a respawn */
+  if (!walls_known || !steering || dt <= 0 || warped) {
+    if (walking_through)
+      log_printf("walls: handed back (known %d, stick %.2f, camera %d, dt %.3f, warped %d)", (int)walls_known,
+                 tilt, (int)(tilt > 0 && !steering), dt, (int)warped);
+    walls_stop();
+  } else {
+    if (!same_dir) {
+      if (walking_through)
+        log_printf("walls: handed back, the stick turned");
+      walls_stop();
+    }
+    double stick_speed = tilt * RUN_SPEED;
+    double asked = requested[1] * ux + requested[0] * uz; /* the game's requested velocity, the stick's way */
+    double moved = (game_dx * ux + game_dz * uz) / dt;    /* and how fast it actually moved him that way */
+    if (walking_through && !phasing && asked >= FREE_AGAIN * stick_speed) {
+      log_printf("walls: handed back, running freely (asked %.2f)", asked);
+      walls_stop();
+    }
+    if (!walking_through) {
+      bool held = asked < HELD_BACK * stick_speed && moved < HELD_BACK * stick_speed;
+      held_back_for = held ? held_back_for + dt : 0;
+      if (held_back_for >= HELD_BACK_TIME) {
+        walking_through = true;
+        walls_trace = 0;
+        phasing = layers_player_hits_ground(false);
+        phase_y = pos[1];
+        log_printf("walls: held back %.2f s (asked %.2f, moved %.2f of %.2f), through, layers off %d",
+                   held_back_for, asked, moved, stick_speed, (int)phasing);
+      }
+    }
+    double x = cx, z = cz;
+    if (walking_through) {
+      double speed = stick_speed * (double_speed ? 2 : 1);
+      x = walls_x + ux * speed * dt;
+      z = walls_z + uz * speed * dt;
+      if (walls_trace < WALLS_TRACE_FRAMES) {
+        log_printf("walls f%d: game moved %.3f, %.3f asked %.2f | record %.3f, %.3f, %.3f -> %.3f, %.3f, %.3f",
+                   walls_trace, game_dx, game_dz, asked, cx, pos[1], cz, x, phasing ? phase_y : pos[1], z);
+        walls_trace++;
+      }
+      if (phasing) { /* as levitate: the position, and the motion state when the game has cleared it */
+        bool cleared = true;
+        for (int i = 0; i < MOTION_WORDS; i++)
+          cleared &= ((volatile uint32_t *)(record + RECORD_POS_SIZE))[i] == 0;
+        write_record(record, x, phase_y, z, (float)(ux * speed), 0, (float)(uz * speed),
+                     record_has_motion && cleared);
+        walls_wrote = true;
+      }
+    } else if (double_speed) { /* as 2x speed: the game's move again */
+      x = cx + game_dx;
+      z = cz + game_dz;
+    }
+    if (!phasing && (x != cx || z != cz)) {
+      pos[0] = x;
+      pos[2] = z;
+      walls_wrote = true;
+    }
+    cx = x;
+    cz = z;
+  }
+  walls_x = cx;
+  walls_z = cz;
+  walls_dir_x = steering ? ux : 0;
+  walls_dir_z = steering ? uz : 0;
+  walls_known = true;
+}
+
 /* --- frame --------------------------------------------------------------------------------------- */
 
 /* seconds since the last frame, at most MAX_DT */
@@ -682,6 +826,7 @@ void levitate_frame(bool menu_open)
 {
   input_hide_from_game = (levitate_enabled ? BTN_LSTICK : 0) | (floating ? BTN_RSTICK : 0);
   double dt = frame_seconds();
+  layers_frame(cheats[CHEAT_WALLS]);
   heal_after_drop();
   handle_l3(menu_open);
 
@@ -697,21 +842,35 @@ void levitate_frame(bool menu_open)
     moving_link = false;
     floating = false;
     speed_known = false;
+    walls_known = false;
+    walls_stop();
   }
 
   bool want_speed = cheats[CHEAT_SPEED] && !floating && !menu_open;
-  if (search_state == SEARCH_IDLE && (floating || want_speed)) {
+  bool want_walls = cheats[CHEAT_WALLS] && !floating && !menu_open;
+  if (search_state == SEARCH_IDLE && (floating || want_speed || want_walls)) {
     search_start(!floating);
     return;
   }
   if (search_state != SEARCH_READY) {
     speed_known = false;
+    walls_known = false;
+    walls_stop();
     return;
+  }
+  if (!want_walls) {
+    if (walking_through)
+      log_printf("walls: handed back, cheat off, floating or menu open");
+    walls_known = false;
+    walls_stop();
   }
   if (floating) {
     if (!moving_link)
       float_start();
     float_step(dt, menu_open);
+    speed_known = false;
+  } else if (want_walls) {
+    walls_step(dt, want_speed); /* does 2x speed too */
     speed_known = false;
   } else if (want_speed) {
     speed_step();

@@ -360,10 +360,10 @@ static bool camera_look(float pos[3], float at[3])
   return true;
 }
 
-/* Read-only: resolve both 64-bit pointers afresh, including after scene changes.
- * sys_ptr/sys_read32 check alignment and readable mappings before dereferencing.
- * Guard the offset additions too, so a corrupt pointer cannot wrap to another mapping. */
-static bool js_height(float *out)
+/* Resolve both 64-bit pointers afresh, including after scene changes. sys_ptr checks alignment and
+ * readable mappings before dereferencing; the offset additions are guarded too, so a corrupt pointer
+ * cannot wrap to another mapping. */
+bool js_height_address(uintptr_t *addr)
 {
   uintptr_t p = link_actor();
   if (!p || p > UINTPTR_MAX - 0x270)
@@ -374,8 +374,15 @@ static bool js_height(float *out)
   p = sys_ptr(p + 0x358);
   if (!p || p > UINTPTR_MAX - 0x18E8)
     return false;
+  *addr = p + 0x18E8;
+  return true;
+}
+
+static bool js_height(float *out)
+{
+  uintptr_t addr;
   uint32_t bits;
-  if (!sys_read32(p + 0x18E8, &bits))
+  if (!js_height_address(&addr) || !sys_read32(addr, &bits))
     return false;
   memcpy(out, &bits, sizeof(*out));
   return true;

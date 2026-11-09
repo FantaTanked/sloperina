@@ -121,7 +121,11 @@ The two lines under them count the walls in this map and those near you, and say
 **infinite**: energy, rupees, magic, deku sticks, deku nuts, deku seeds, bombs, arrows, bombchus, magic beans:
 each kept full while ticked.
 
-**player**: **2x movement speed** makes Link move twice as far each frame.
+**player**: **2x movement speed** makes Link move twice as far each frame. **walk through walls**: hold the stick
+against a wall, rock or air wall and Link walks on through it at the height he was at, until you let go of the stick
+or turn it. While floating, levitate's own **through walls** setting applies instead. **lock JS height**
+keeps the JS Height watch's value at what it was when you ticked it (3.40282347e+38 after a fresh load), writing it
+back every frame, across area changes too. Ticked at start-up, it keeps the first value it can read.
 
 ### 2.5 Inventory
 
