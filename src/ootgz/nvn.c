@@ -23,6 +23,7 @@
 
 #include "font.h"
 #include "airwall.h"
+#include "enemyhp.h"
 #include "gfx.h"
 #include "sys.h"
 
@@ -1148,14 +1149,24 @@ static void compose_see_through(int p, uint8_t *dst, const uint8_t *under, int u
 #define DOT_COORD_MAX 65535 /* aw_dot_t's coordinates: 0..65535 across the visible picture */
 #define MIN_DOT_SIZE 2
 
-static void draw_airwall_dots(const aw_dot_t *dots, int n, nvn_texture_t *tex, nvn_rect_t area, int texture_height,
-                              int scale)
+static const float airwall_colours[AW_NCOLORS][4] = {
+  [AW_BLOCKS] = { 0.23f, 0.84f, 1.0f, 1.0f }, /* cyan: stops Link */
+  [AW_INSIDE] = { 1.0f, 0.28f, 0.28f, 1.0f }, /* red: Link is inside it */
+  [AW_OTHER] = { 0.60f, 0.55f, 1.0f, 1.0f },  /* violet: other kinds */
+};
+
+/* enemy health (enemyhp.c) */
+static const float enemyhp_colours[EH_NCOLORS][4] = {
+  [EH_BACK] = { 0.05f, 0.05f, 0.05f, 1.0f },  /* the bar's back and the text's background */
+  [EH_FILL] = { 0.30f, 0.85f, 0.30f, 1.0f },  /* green: life left */
+  [EH_LOW] = { 1.0f, 0.28f, 0.28f, 1.0f },    /* red: under a quarter left */
+  [EH_TEXT] = { 1.0f, 1.0f, 1.0f, 1.0f },     /* white digits */
+};
+
+/* The same, drawn the same way, for the enemy health bars: shared by both (colours: n_colours). */
+static void draw_rects(const aw_dot_t *dots, int n, const float (*colours)[4], int n_colours, nvn_texture_t *tex,
+                       nvn_rect_t area, int texture_height, int scale)
 {
-  static const float colours[AW_NCOLORS][4] = {
-    [AW_BLOCKS] = { 0.23f, 0.84f, 1.0f, 1.0f }, /* cyan: stops Link */
-    [AW_INSIDE] = { 1.0f, 0.28f, 0.28f, 1.0f }, /* red: Link is inside it */
-    [AW_OTHER] = { 0.60f, 0.55f, 1.0f, 1.0f },  /* violet: other kinds */
-  };
   int size = scale / SC_ONE < MIN_DOT_SIZE ? MIN_DOT_SIZE : scale / SC_ONE;
   set_render_target(tex);
   for (int i = 0; i < n; i++) {
@@ -1180,7 +1191,7 @@ static void draw_airwall_dots(const aw_dot_t *dots, int n, nvn_texture_t *tex, n
     /* kept inside the visible area */
     x = x < 0 ? 0 : x + w > area.w ? area.w - w : x;
     y = y < 0 ? 0 : y + h > area.h ? area.h - h : y;
-    clear_scissored(area.x + x, area.y + y, w, h, texture_height, colours[dot->color < AW_NCOLORS ? dot->color : 0]);
+    clear_scissored(area.x + x, area.y + y, w, h, texture_height, colours[dot->color < n_colours ? dot->color : 0]);
   }
   reset_scissor();
 }
@@ -1470,10 +1481,11 @@ static void record_readback(nvn_texture_t *tex, const panel_draw_t *draw)
 static void draw_overlay(nvn_queue_t *queue, nvn_window_t *window, int index)
 {
   const gfx_screen_t *screen = gfx_published();
-  int n_dots;
+  int n_dots, n_hp;
   const aw_dot_t *dots = airwall_published(&n_dots);
+  const aw_dot_t *hp = enemyhp_published(&n_hp);
   int pause_icon = gfx_pause_icon;
-  if ((!screen && !n_dots && !pause_icon) || overlay_state == OV_FAILED)
+  if ((!screen && !n_dots && !n_hp && !pause_icon) || overlay_state == OV_FAILED)
     return;
   if (index < 0 || index >= swapchain_texture_count) {
     static bool warned;
@@ -1577,7 +1589,7 @@ static void draw_overlay(nvn_queue_t *queue, nvn_window_t *window, int index)
     draw->scale = scale;
     n++;
   }
-  if (!n && !n_dots && !pause_icon)
+  if (!n && !n_dots && !n_hp && !pause_icon)
     return;
   __asm__ volatile("dsb sy" ::: "memory"); /* pixels reach memory before the GPU copies them */
 
@@ -1585,7 +1597,9 @@ static void draw_overlay(nvn_queue_t *queue, nvn_window_t *window, int index)
   fn.cmd_add_control(&cmd_buffer, control_mem + frame.slot * CTRL_SIZE, CTRL_SIZE);
   fn.cmd_begin(&cmd_buffer);
   if (n_dots)
-    draw_airwall_dots(dots, n_dots, tex, frame.area, th, frame.scale);
+    draw_rects(dots, n_dots, airwall_colours, AW_NCOLORS, tex, frame.area, th, frame.scale);
+  if (n_hp)
+    draw_rects(hp, n_hp, enemyhp_colours, EH_NCOLORS, tex, frame.area, th, frame.scale);
   if (pause_icon)
     draw_pause_icon(pause_icon, tex, frame.area, th, frame.scale);
   for (int i = 0; i < n; i++) {

@@ -109,6 +109,7 @@ and you'll come out at the chosen place. Under **return**: the **current** map a
 |---|---|
 | **reload map** | Reloads the current map (at the age set in **link**). |
 | **collision** | See below. |
+| **enemy health** | A bar with **life/max** over each living enemy within 30 m of Link (red under a quarter); it goes when the enemy reaches 0. Enemies that haven't appeared yet (Wolfos still in the ground, Stalfos before they drop) have none. |
 
 #### 2.3.1 Collision
 

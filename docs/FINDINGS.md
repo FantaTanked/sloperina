@@ -729,3 +729,26 @@ Entries 1 to 4 and 14 were empty; 35 and 40 had no name getter.
     `LostWood_Child` as he walked.
   - StaticCompoundBodyMgr is the obvious place to look for the map's collision in memory (COLLISION.md, "the
     unknowns"), and DungeonMgr for the explored room a menu warp leaves unset (§8).
+
+### 9.4 Actors, their life and position (from the disassembly, v131072; checked in game 9th November 2026)
+- **The actor manager** `mgr = *(main+0x4E90D90)` (`+0x00` a mutex: lock `main+0x3C42460`, unlock `main+0x3C42470`).
+  The live actors are in an intrusive red-black tree at `[mgr+0x38]`: node N has left `+0x00`, right `+0x08`,
+  parent|colour `+0x10`; each node is at `+8` in an entry E (`E = N - 8`) with the actor at `[E+0x28]` and the next
+  entry with the same key at `[E+0x38]` (an entry pointer, no -8). The game walks it in order under the lock
+  (`main+0x29b2d10`, `0x880cd0`, `0xaa7e48`). No count was found (`mgr+0x28` or `+0x40` may be one).
+- **An actor:** name `char *` at `+0x20` (`"Enemy_Gibdo"`, compared at `0x29eceac`), state at `+0x2C` (the walks
+  skip below 2; 7..11 is dying, dead or deleted), world position (3 floats) at `+0x31C` (`QueryActorGetPosition`,
+  `0x29a8940`), its rotation matrix from `+0x328`. Game actors share Link's vtable `vt_linkobj`.
+- **Life:** the Life component is `[[actor+0x270]+0x2B8]` (vtable `main+0x4B4C460`, name "ライフ"); its parameter
+  objects (vtable `vt_param`, s32 at `+8`) are the current life at `+0x1C10` and the max at `+0x1C18`
+  (`QueryActorLife` `0x29afbc0`, `QueryLifeGetLifeByActor` `0x2a487a0`). So the `+0x1C10/+0x1C18` block in `link.c` is
+  this generic component, not Link's own.
+- **Checked in game** (SacredForestMeadow, Forest Temple): the walk finds 140-1000 actors; Link's life read this way
+  matches `link.c`; Wolfos (9), Stalfos_Weak (18), Skulltula (2), Bubble_Blue (1) lose life as they're hit. Enemies'
+  current/max objects are not `vt_param` objects like Link's (another kind, value also an s32 at `+8`).
+- **Has it appeared?** The state at `+0x2C`: an enemy the game keeps waiting, alive and at full life, sits at **6**
+  (Wolfos still in the ground, Stalfos before they drop, Poe sisters, Skulltulas before they come down) or 3, and goes
+  to **4** (or 5) when it appears. Found by logging Wolfos before and after they jumped out, the two that stayed
+  hidden as a control: also `+0x30` 8 -> 0, `+0x6E4` ffffffff -> 0 and `+0x518` 0x100 -> 0x42f changed with it.
+- A dungeon keeps all its rooms' actors: Forest Temple had 32+ live enemies, so scene > enemy health keeps the 32
+  nearest Link within 30 m. Its summary (`actors:` lines) goes to the log every 300 frames while it's on.

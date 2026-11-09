@@ -14,6 +14,7 @@
 #include "settings.h"
 
 #include "cheats.h"
+#include "enemyhp.h"
 #include "gfx.h"
 #include "sys.h"
 #include "warp.h"
@@ -82,6 +83,7 @@ typedef struct {
   int32_t levitate_walls;
   int32_t airwalls_shown;
   int32_t airwalls_all;
+  int32_t enemy_hp;
 } snapshot_t;
 
 static bool mounted;
@@ -136,6 +138,7 @@ static snapshot_t take_snapshot(void)
   s.levitate_walls = levitate_through_walls;
   s.airwalls_shown = airwalls_shown;
   s.airwalls_all = airwalls_all;
+  s.enemy_hp = enemy_hp_shown;
   return s;
 }
 
@@ -198,6 +201,7 @@ static void apply_snapshot(const snapshot_t *s)
   levitate_through_walls = s->levitate_walls != 0;
   airwalls_shown = s->airwalls_shown != 0;
   airwalls_all = s->airwalls_all != 0;
+  enemy_hp_shown = s->enemy_hp != 0;
 }
 
 /* --- reading the file ------------------------------------------------------------------------- */
@@ -267,6 +271,7 @@ static const struct { const char *key; size_t field_offset; } int_keys[] = {
   INT_KEY("levitate_through_walls", levitate_walls),
   INT_KEY("airwalls_shown", airwalls_shown),
   INT_KEY("airwalls_all", airwalls_all),
+  INT_KEY("enemy_health", enemy_hp),
 };
 #define N_INT_KEYS (sizeof(int_keys) / sizeof(*int_keys))
 
@@ -431,11 +436,12 @@ static void save_settings_file(const snapshot_t *s)
   int n = snprintf(buf, sizeof(buf),
                    "cheats=%u\nwatch_list=%s\nwatches_shown=%d\nwatch_position=%d\nwatch_x=%d\nwatch_y=%d\nopacity=%d\n"
                    "arrival_cutscenes=%d\nlevitate=%d\nlevitate_speed=%d\nlevitate_move_speed=%d\n"
-                   "levitate_through_walls=%d\nairwalls_shown=%d\nairwalls_all=%d\n",
+                   "levitate_through_walls=%d\nairwalls_shown=%d\nairwalls_all=%d\nenemy_health=%d\n",
                    (unsigned)s->cheats, list, (int)s->watches_shown, (int)s->watch_position,
                    (int)s->watch_x, (int)s->watch_y,
                    (int)s->opacity, (int)s->arrival_cutscenes, (int)s->levitate, (int)s->levitate_speed,
-                   (int)s->levitate_move, (int)s->levitate_walls, (int)s->airwalls_shown, (int)s->airwalls_all);
+                   (int)s->levitate_move, (int)s->levitate_walls, (int)s->airwalls_shown, (int)s->airwalls_all,
+                   (int)s->enemy_hp);
   if (n < (int)sizeof(buf))
     n += snprintf(buf + n, sizeof(buf) - n,
                   "language=%s\nframe_advance=%d\nframe_advance_button=%d\npause_display=%d\nmenu_size=%d\n"

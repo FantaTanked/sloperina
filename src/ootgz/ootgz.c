@@ -21,6 +21,7 @@
 #include "menu.h"
 #include "menus.h"
 #include "airwall.h"
+#include "enemyhp.h"
 #include "levitate.h"
 #include "settings.h"
 #include "warp.h"
@@ -333,6 +334,7 @@ static void frame(void)
     menu_draw();
   }
   airwall_frame();
+  enemyhp_frame();
   menus_research_frame();
   watches_frame(menu_current != 0);
   levitate_frame(menu_current != 0);

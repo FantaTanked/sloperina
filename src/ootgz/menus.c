@@ -7,6 +7,7 @@
 #include "data.h"
 #include "gamedata.h"
 #include "airwall.h"
+#include "enemyhp.h"
 #include "memview.h"
 #include "osk.h"
 #include "build_info.h" /* made by the Makefile: BUILD_WHEN, BUILD_VERSION */
@@ -1851,6 +1852,16 @@ static void set_air_walls_all(menu_item_t *it, bool on)
   airwalls_all = on;
 }
 
+static bool get_enemy_hp(menu_item_t *it)
+{
+  return enemy_hp_shown;
+}
+
+static void set_enemy_hp(menu_item_t *it, bool on)
+{
+  enemy_hp_shown = on;
+}
+
 static void text_air_wall_summary(menu_item_t *it, char *buf, int len)
 {
   char summary[64];
@@ -1867,11 +1878,16 @@ static void text_air_wall_link(menu_item_t *it, char *buf, int len)
 
 static void build_scene(void)
 {
-  menu_init(&m_scene, "scene", 3);
+  menu_init(&m_scene, "scene", 4);
   menu_item_t *reload = menu_add_action(&m_scene, "reload map", act_reload_map, 0);
   if (reload)
     reload->hint = "L: reload this map (at the age set in the link menu)";
   menu_add_submenu(&m_scene, "collision", &m_collision);
+  menu_item_t *enemy_hp = menu_add_check(&m_scene, "enemy health", get_enemy_hp, set_enemy_hp, 0);
+  if (enemy_hp) {
+    enemy_hp->hint = "a bar and life/max over each enemy";
+    enemy_hp->log_label = "enemy health:";
+  }
   menu_add_return(&m_scene);
 
   menu_init(&m_collision, "collision", 6);
