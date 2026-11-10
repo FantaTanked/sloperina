@@ -537,6 +537,22 @@ Objects:
   opened on 1.0.0. A host-side read/write test used the different String64 indices from each build.
   Full in-game warping after the String64 fix still needs a play test.
 
+### 5.21 Locking Link's X, Y and Z (1.1.1 only)
+- **Cause:** the game's collision resolver and its body-position stores move Link after the module writes him, so
+  a written position doesn't hold through address writes. The stores are: collision `main+0x18D2C18`, `+0x18D2C20`; body `main+0x180EA24` (`stp d0, d1,
+  [x23, #0x10]`, X and Y together) and `main+0x180EA2C` (`str d0, [x23, #0x20]`, Z). Link's body centre is the
+  physics record (`levitate.c`), 0.585 above his drawn position.
+- **Fix:** We replace each store with a branch to a stub in the cave (`STORES_OFF` = 0x80). The stub
+  saves x16/x17 and tests bits in the lock word. X and Y share the stp, so its stub runs one of four variants
+  `lock.c` sets the bits from the menu (link > lock X / lock Y / lock Z) 
+  and from save / load position (all three, while a load settles). The menu's
+  locks let go when the map changes, since a warp runs Link through the same stores.
+- **Axes:** Y is height; X and Z are horizontal.
+- **Checked:** `mkips` writes the stubs and branches for `1.1.1`; the words were compared with clang's assembly
+  (`stp`/`ldp`, `adrp`/`ldr` of the slot, the `tbnz` bit numbers, the original stores) and every branch resolves to
+  its intended address. The module files compile for aarch64.
+- **Not verified:** `1.0.0` has no store offsets, so locks there only show a notice that it will not work.
+
 ## 6. Things that do not work
 
 - **Using character 0x7F for an icon:** menu, log, splash, and input panels already use it as an

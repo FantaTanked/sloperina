@@ -11,7 +11,8 @@
  * were held failed). "loading position" shows at once, as "position saved" does (saving only reads, so
  * it doesn't wait), and "position loaded" when he's there. It's then checked: done once
  * Link is drawn there; otherwise written again a few times, and if it never takes, the record is put
- * back where Link is (so it isn't "lost" and searched for again). */
+ * back where Link is (so it isn't "lost" and searched for again). While it settles, the game's stores
+ * can't move X, Y or Z (lock.c), so the game can't pull him off the write. */
 #include "position.h"
 
 #include "gamedata.h"
@@ -19,6 +20,7 @@
 #include "input.h"
 #include "levitate.h"
 #include "link.h"
+#include "lock.h"
 #include "sys.h"
 
 #define SAVE_COMBO (BTN_R | BTN_DUP)
@@ -117,21 +119,29 @@ static bool link_there(void)
   return link_drawn_pos(&d) && absd(d.x - sx) < NEAR && absd(d.y - sy) < NEAR && absd(d.z - sz) < NEAR;
 }
 
+/* the load is over one way or another: the game's stores can move Link again */
+static void settle_done(void)
+{
+  settle = 0;
+  lock_hold_set(false);
+}
+
 /* each frame after a load's first write */
 static void settle_step(void)
 {
   if (!in_saved_map() || link_record_status() != REC_READY) {
-    settle = 0; /* another map now (the record is gone): leave it alone */
+    settle_done(); /* another map now (the record is gone): leave it alone */
     log_printf("position load abandoned (map changed)");
     return;
   }
   if (link_there()) {
     log_printf("position loaded (%d write%s)", writes, writes == 1 ? "" : "s");
     gfx_notice("position loaded");
-    settle = 0;
+    settle_done();
     return;
   }
   if (--settle == 0) {
+    lock_hold_set(false);
     link_record_resync();
     log_printf("position load didn't take after %d writes", writes);
     gfx_notice("load position didn't work, try again");
@@ -160,9 +170,12 @@ void position_frame(bool menu_open)
   if (pending && st == REC_READY && !(input_held() & LOAD_COMBO)) {
     pending = false;
     writes = 0;
+    lock_hold_set(true); /* the write holds: the game's stores can't pull him off it while it settles */
     if (write_saved()) {
       settle = SETTLE;
       log_printf("position load: writing %.3f %.3f %.3f", sx, sy, sz);
+    } else {
+      lock_hold_set(false);
     }
   } else if (settle) {
     settle_step();

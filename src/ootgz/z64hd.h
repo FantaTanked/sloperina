@@ -10,6 +10,25 @@ struct z64hd_link_path {
   uint32_t member;
 };
 
+struct z64hd_store {
+  uint32_t off;
+  uint32_t original;
+  uint32_t bit;
+};
+
+/* X and Y share one store so it has its own stub with a bit for each axis lol */
+struct z64hd_pair {
+  uint32_t off;
+  uint32_t original;  /* stp d0, d1, [x23, #0x10] */
+  uint32_t x_held;    /* what the store becomes while X is held: str d1, [x23, #0x18] (Y only) */
+  uint32_t y_held;    /* while Y is held: str d0, [x23, #0x10] (X only) */
+};
+
+#define LOCK_BIT_X         0u /* body X (horizontal) */
+#define LOCK_BIT_Y         1u /* body Y (height) */
+#define LOCK_BIT_Z         2u /* body Z (horizontal) */
+#define LOCK_BIT_COLLISION 3u /* the collision resolver's two stores; set whenever an axis is held */
+
 struct z64hd_build {
   const char *version;
   const char *build_id;
@@ -19,6 +38,10 @@ struct z64hd_build {
   uint32_t cave_start;
   uint32_t cave_end;
   uint32_t hook_slot;
+  uint32_t lock_slot;               /* 8-byte word in main's bss */
+  const struct z64hd_pair *pair;    /* NULL when the build has no stores */
+  const struct z64hd_store *stores;
+  uint32_t store_count;
   uint32_t frame_site;
   uint32_t gd_unlock;
   uint32_t gd_mgr_ptr;

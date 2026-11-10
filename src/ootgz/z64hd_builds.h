@@ -4,6 +4,21 @@
 
 #include "z64hd.h"
 
+/* The stores that write Link's position which i found by abusing lichii's cheat engine
+ * X and Y share the stp (pair); the variants per lock are the trainer's XY_VARIANTS. Z is one str.
+ * The collision resolver's two stores freeze with any lock */
+static const struct z64hd_pair pair_1_1_1 = {
+  0x180EA24, 0x6D0106E0, /* stp d0, d1, [x23, #0x10] */
+  0xFD000EE1,            /* str d1, [x23, #0x18]: X held, Y moves */
+  0xFD000AE0,            /* str d0, [x23, #0x10]: Y held, X moves */
+};
+
+static const struct z64hd_store stores_1_1_1[] = {
+  { 0x18D2C18, 0xA9002688, LOCK_BIT_COLLISION },
+  { 0x18D2C20, 0xA9002668, LOCK_BIT_COLLISION },
+  { 0x180EA2C, 0xFD0012E0, LOCK_BIT_Z },       /* str d0, [x23, #0x20] */
+};
+
 static const struct z64hd_build z64hd_builds[] = {
   {
     .version = "1.0.0",
@@ -61,6 +76,11 @@ static const struct z64hd_build z64hd_builds[] = {
     .cave_start = 0x3C46400,
     .cave_end = 0x3C47000,
     .hook_slot = 0x4E9A4D0,
+    /* the word after the hook slot: unverified (BUILDING.md: watch it before relying on it) */
+    .lock_slot = 0x4E9A4D8,
+    .pair = &pair_1_1_1,
+    .stores = stores_1_1_1,
+    .store_count = sizeof(stores_1_1_1) / sizeof(stores_1_1_1[0]),
     .frame_site = 0x3B500DC,
     .gd_unlock = 0x3C42470,
     .gd_mgr_ptr = 0x4C7E180,

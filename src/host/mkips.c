@@ -9,6 +9,10 @@
  *                              cbz  x16, 1f   ; br  x16
  *                          1:  b    unlock               (original behaviour until hooked)
  *   FRAME_SITE          b stub                            (was: b unlock, a tail call)
+ *   STORES_OFF          the X+Y store's stub (builds with stores): saves x16/x17, tests the X and Y bits at
+ *                       lock_slot and runs the original stp, one single-value store (Y held: str d0 at +0x10,
+ *                       X held: str d1 at +0x18) or nothing (both held). Then one stub per single store (Z,
+ *                       collision): skips the store while its bit is set, else runs it. Each site becomes `b`.
  */
 #include <stdint.h>
 #include <stdio.h>
@@ -21,9 +25,17 @@
 #define NSO_HEADER 0x100
 
 #define X16         16 /* the stub's scratch register (IP0: free to clobber at a branch) */
+#define X17         17 /* the store stubs' second scratch register, saved around the test */
 #define STUB_INSNS  5
 #define STUB_SIZE   (STUB_INSNS * 4)
+#define STORE_INSNS 9
+#define STORE_SIZE  (STORE_INSNS * 4)
+#define PAIR_INSNS  17 /* the X+Y store's stub: four ways to run it, one per lock state */
+#define PAIR_SIZE   (PAIR_INSNS * 4)
 #define MARKER_SIZE 16 /* OOTGZ_MARKER (8), the version (4), the revision (4) */
+
+#define STP_X16_X17_PRE  0xA9BF47F0u /* stp x16, x17, [sp, #-16]! */
+#define LDP_X16_X17_POST 0xA8C147F0u /* ldp x16, x17, [sp], #16 */
 
 /* --- AArch64 instruction encodings --------------------------------------------------------- */
 
@@ -55,6 +67,12 @@ static uint32_t insn_cbz_x(int rt, uint32_t from, uint32_t to)
 }
 
 static uint32_t insn_br(int rn) { return 0xD61F0000u | (uint32_t)rn << 5; }
+
+static uint32_t insn_tbnz(int rt, uint32_t bit, uint32_t from, uint32_t to)
+{
+  return 0x37000000u | (bit & 31) << 19 | (((uint32_t)((int32_t)(to - from) >> 2)) & 0x3FFFu) << 5 |
+         (uint32_t)rt;
+}
 
 /* --- writing the patch -------------------------------------------------------------------- */
 
@@ -102,6 +120,13 @@ int main(int argc, char **argv)
     fprintf(stderr, "invalid hook slot or code cave for %s\n", build->version);
     return 1;
   }
+  uint32_t stores_at = build->cave_start + OOTGZ_STORES_OFF;
+  uint32_t stores_size = (build->pair ? PAIR_SIZE : 0) + build->store_count * STORE_SIZE;
+  if ((build->pair || build->store_count) &&
+      ((build->lock_slot & 7) || stores_at + stores_size > build->cave_end)) {
+    fprintf(stderr, "invalid lock slot or code cave for %s\n", build->version);
+    return 1;
+  }
 
   uint8_t marker[MARKER_SIZE] = { 0 };
   memcpy(marker, OOTGZ_MARKER, 8);
@@ -132,6 +157,66 @@ int main(int argc, char **argv)
   write_record(f, build->cave_start, marker, sizeof(marker));
   write_record(f, stub_at, stub, sizeof(stub));
   write_record(f, build->frame_site, site, sizeof(site));
+
+  uint32_t at = stores_at;
+  if (build->pair) {
+    const struct z64hd_pair *p = build->pair;
+    uint32_t site_at = p->off;
+    uint32_t back = site_at + 4;
+    uint32_t pair_code[PAIR_INSNS] = {
+      STP_X16_X17_PRE,                                       /* +0 */
+      insn_adrp(X16, at + 4, build->lock_slot),              /* +4 */
+      insn_ldr_x(X17, X16, build->lock_slot & 0xFFF),        /* +8 */
+      insn_tbnz(X17, LOCK_BIT_X, at + 12, at + 32),          /* X held: to hx */
+      insn_tbnz(X17, LOCK_BIT_Y, at + 16, at + 48),          /* Y held only: to hy */
+      LDP_X16_X17_POST,                                      /* neither: the original store */
+      p->original,
+      insn_b(at + 28, back),
+      insn_tbnz(X17, LOCK_BIT_Y, at + 32, at + 60),          /* hx: both held: skip */
+      LDP_X16_X17_POST,                                      /* X held: write Y only */
+      p->x_held,
+      insn_b(at + 44, back),
+      LDP_X16_X17_POST,                                      /* hy: write X only */
+      p->y_held,
+      insn_b(at + 56, back),
+      LDP_X16_X17_POST,                                      /* skip */
+      insn_b(at + 64, back),
+    };
+    uint8_t bytes[PAIR_SIZE];
+    for (int k = 0; k < PAIR_INSNS; k++)
+      put_le32(bytes + 4 * k, pair_code[k]);
+    write_record(f, at, bytes, sizeof(bytes));
+    uint8_t branch[4];
+    put_le32(branch, insn_b(site_at, at));
+    write_record(f, site_at, branch, sizeof(branch));
+    at += PAIR_SIZE;
+  }
+  for (uint32_t i = 0; i < build->store_count; i++) {
+    const struct z64hd_store *store = &build->stores[i];
+    uint32_t site_at = store->off;
+    uint32_t skip = at + 7 * 4;
+    uint32_t back = site_at + 4;
+    uint32_t store_code[STORE_INSNS] = {
+      STP_X16_X17_PRE,
+      insn_adrp(X16, at + 4, build->lock_slot),
+      insn_ldr_x(X17, X16, build->lock_slot & 0xFFF),
+      insn_tbnz(X17, store->bit, at + 12, skip),
+      LDP_X16_X17_POST,
+      store->original,
+      insn_b(at + 24, back),
+      LDP_X16_X17_POST,
+      insn_b(at + 32, back),
+    };
+    uint8_t bytes[STORE_SIZE];
+    for (int k = 0; k < STORE_INSNS; k++)
+      put_le32(bytes + 4 * k, store_code[k]);
+    write_record(f, at, bytes, sizeof(bytes));
+
+    uint8_t branch[4];
+    put_le32(branch, insn_b(site_at, at));
+    write_record(f, site_at, branch, sizeof(branch));
+    at += STORE_SIZE;
+  }
   fwrite("EEOF", 1, 4, f);
   if (fclose(f) != 0) {
     perror(argv[1]);

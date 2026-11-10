@@ -31,6 +31,7 @@
 #include "ootgz_version.h"
 #include "pouch.h"
 #include "position.h"
+#include "lock.h"
 #include "sys.h"
 #include "z64hd.h"
 #include "z64hd_builds.h"
@@ -48,6 +49,7 @@ static uint32_t frames_run;
 
 #define MENU_COMBO (BTN_R | BTN_RS_DOWN) /* gz: R + C-down */
 #define BACK_COMBO (BTN_R | BTN_DLEFT)   /* up one level; closes at the top */
+#define BACK_BUTTON BTN_B
 
 /* --- frame advance ---------------------------------------------------------------------------
  * With it on (settings > frame advance), a tap of its button (L or R, menu closed) pauses the game:
@@ -163,7 +165,7 @@ static bool menu_controls(void)
     menu_open(&menu_root);
   else if (menu_current && input_combo(MENU_COMBO))
     menu_close(); /* the open combo toggles it */
-  else if (menu_current && input_combo(BACK_COMBO))
+  else if (menu_current && (input_combo(BACK_COMBO) || (input_pressed() & BACK_BUTTON)))
     menu_back();
   else if (menu_current) {
     watches_sync();
@@ -339,6 +341,7 @@ static void frame(void)
   watches_frame(menu_current != 0);
   levitate_frame(menu_current != 0);
   position_frame(menu_current != 0);
+  lock_frame();
   warp_frame();
   gfx_frame();
 
