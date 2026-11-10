@@ -84,6 +84,7 @@ static const char *const names[GAMEIMAGES] = {
   [GAMEPIC_SWORD_BROKEN] = "Weapon_Sword_BrokenGiant", [GAMEPIC_SWORD_BIGGORON] = "Weapon_Sword_Biggoron",
   [GAMEPIC_GAUNTLETS_GOLD] = "Armor_Adult_Gauntlet_Gold", [GAMEPIC_SCALE_GOLD] = "Item_Scale_Gold",
   [GAMEPIC_MAGIC_DOUBLE] = "Item_FairyBless_MPDouble", [GAMEPIC_POTION_GREEN] = "Item_Bottle_GreenPotion",
+  [GAMEPIC_SCRUB_SEED] = "Item_ScrubBusinessSeed",
 };
 
 /* the shared archive (its pictures [0, GAMEIMAGES_SHARED)), then the icons one file each */

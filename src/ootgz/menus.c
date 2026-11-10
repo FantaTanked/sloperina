@@ -562,7 +562,8 @@ static const struct { const char *label; uint8_t picture; } item_pictures[] = {
   { "goron's bracelet", GAMEPIC_BRACELET }, { "gauntlets", GAMEPIC_GAUNTLETS }, { "scale", GAMEPIC_SCALE },
   { "skulltulas", GAMEPIC_SKULLTULA }, { "deku stick bag", GAMEPIC_STICK_BAG }, { "deku nut bag", GAMEPIC_NUT_BAG },
   { "deku seed bag", GAMEPIC_BULLET_BAG }, { "bomb bag", GAMEPIC_BOMB_BAG }, { "quiver", GAMEPIC_QUIVER },
-  { "wallet", GAMEPIC_WALLET },
+  { "wallet", GAMEPIC_WALLET }, { "business scrub seed", GAMEPIC_SCRUB_SEED },
+  { "business scrub seeds", GAMEPIC_SCRUB_SEED },
 };
 
 static bool same_text(const char *a, const char *b)
@@ -616,7 +617,9 @@ static void build_cheats(void)
 {
   menu_init(&m_cheats, "cheats", CHEAT_COUNT + 3);
   menu_add_heading(&m_cheats, "infinite");
-  for (int cheat = 0; cheat < CHEAT_COUNT; cheat++) {
+  for (int i = 0; i < CHEAT_COUNT; i++) {
+    /* cheat_t's order (append only), with the scrub seeds after the beans */
+    int cheat = i <= CHEAT_BEANS ? i : i == CHEAT_BEANS + 1 ? CHEAT_SCRUB_SEEDS : i - 1;
     if (cheat == CHEAT_SPEED)
       menu_add_heading(&m_cheats, "player");
     menu_add_check(&m_cheats, cheat_names[cheat], get_cheat, set_cheat, cheat);
@@ -651,6 +654,22 @@ static void set_owned(menu_item_t *it, bool on)
     if (item->button)
       pouch_clear_buttons(item->button);
   }
+}
+
+/* The business scrub seed (the item screen's slot after the bottles, PouchTable's ItemArray): one in the pouch,
+ * StockNum 1 and IsGet, as a trade item */
+#define SCRUB_SEED "Item_ScrubBusinessSeed"
+
+static bool get_scrub_seed(menu_item_t *it)
+{
+  int32_t stock;
+  return gd_get_int(stock_hash(SCRUB_SEED), &stock) && stock > 0;
+}
+
+static void set_scrub_seed(menu_item_t *it, bool on)
+{
+  gd_set_int(stock_hash(SCRUB_SEED), on ? 1 : 0);
+  gd_set_bool(is_get_hash(SCRUB_SEED), on);
 }
 
 static bool get_acquired(menu_item_t *it)
@@ -835,6 +854,15 @@ static int32_t get_number(menu_item_t *it)
 static void set_number(menu_item_t *it, int32_t value)
 {
   gd_set_int(((const number_t *)it->data)->hash, value);
+}
+
+/* The tokens' count, and (any at all) that they were got: without IsGet the collection screen shows the slot
+ * empty, whatever the count (1.0.0) */
+static void set_skulltulas(menu_item_t *it, int32_t value)
+{
+  set_number(it, value);
+  if (value > 0)
+    mark_acquired(is_get_hash("Item_Token_Gold"));
 }
 
 static int32_t max_from_data2(menu_item_t *it)
@@ -1067,7 +1095,7 @@ static void build_items(void)
   for (int i = 0; i < data_n_bottle_contents && i < MAX_CHOICES - 1; i++)
     bottle_choices[i + 1] = data_bottle_names[i];
   static const char *const bottle_labels[] = { "bottle a", "bottle b", "bottle c", "bottle d", "bottle e" };
-  menu_init(&m_universal, "universal", 14);
+  menu_init(&m_universal, "universal", 15);
   add_item(&m_universal, "bombs", "bombs");
   add_item(&m_universal, "bombchus", "bombchus");
   add_item(&m_universal, "deku nuts", "deku nuts");
@@ -1078,6 +1106,9 @@ static void build_items(void)
   for (int bottle = 0; bottle < ARRAY_LEN(bottle_labels); bottle++)
     menu_add_option(&m_universal, bottle_labels[bottle], data_n_bottle_contents + 1, bottle_choices, get_bottle,
                     set_bottle, bottle);
+  menu_item_t *seed = menu_add_check(&m_universal, "business scrub seed", get_scrub_seed, set_scrub_seed, 0);
+  if (seed)
+    seed->log_label = "business scrub seed:";
   menu_add_return(&m_universal);
 }
 
@@ -1147,8 +1178,8 @@ static void build_collection(void)
   add_upgrade(&m_collection, "gauntlets", UPG_GAUNTLETS);
   menu_add_heading(&m_collection, "other");
   add_upgrade(&m_collection, "scale", UPG_SCALE);
-  menu_item_t *skulltulas = menu_add_number(&m_collection, "skulltulas", get_number, set_number, max_from_data2, 0,
-                                            (intptr_t)&data_skulltulas);
+  menu_item_t *skulltulas = menu_add_number(&m_collection, "skulltulas", get_number, set_skulltulas, max_from_data2,
+                                            0, (intptr_t)&data_skulltulas);
   if (skulltulas)
     skulltulas->data2 = MAX_SKULLTULAS;
   menu_add_submenu(&m_collection, "ammo capacity", &m_capacity);

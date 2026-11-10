@@ -129,8 +129,8 @@ Link stays in front of them.
 
 ### 2.4 Cheats
 
-**infinite**: energy, rupees, magic, deku sticks, deku nuts, deku seeds, bombs, arrows, bombchus, magic beans:
-each kept full while ticked.
+**infinite**: energy, rupees, magic, deku sticks, deku nuts, deku seeds, bombs, arrows, bombchus, magic beans,
+business scrub seeds (30): each kept full while ticked.
 
 **player**: **2x movement speed** makes Link move twice as far each frame. **walk through walls**: hold the stick
 against a wall, rock or air wall and Link walks on through it at the height he was at, until you let go of the stick
@@ -141,10 +141,10 @@ maximum, see **watches > Lock JS Height**.)
 
 | Menu | What's in it |
 |---|---|
-| **items** | **child items** (deku sticks, boomerang, fairy slingshot, magic beans, child trade item), **adult items** (fairy bow, megaton hammer, fire / ice / light arrow, the **hookshot** switch: none / hookshot / longshot, adult trade item), **universal** (bombs, bombchus, deku nuts, Din's fire, Farore's wind, Nayru's love, ocarina, bottles A to E). |
+| **items** | **child items** (deku sticks, boomerang, fairy slingshot, magic beans, child trade item), **adult items** (fairy bow, megaton hammer, fire / ice / light arrow, the **hookshot** switch: none / hookshot / longshot, adult trade item), **universal** (bombs, bombchus, deku nuts, Din's fire, Farore's wind, Nayru's love, ocarina, bottles A to E, business scrub seed). |
 | **ammo** | How much of each kind of ammo you carry, up to your bag's size. **L** fills it. |
 | **equipment items** | **swords** (kokiri, master, and the **big sword** switch: none / giant's knife / broken giant's knife / biggoron's sword), **shields** (kokiri, hylian, mirror), **tunics** (goron, zora), **boots** (iron, hover), **other** (lenses of truth, echo gem, **mask slot**: one mask at a time). |
-| **collection** | Fairy ocarina, ocarina of time, gerudo card, double defense; **strength** (goron's bracelet, **gauntlets**: none / silver / gold); **other** (**scale**, **skulltulas**, **ammo capacity**: the size of each bag and the wallet, **magic**: your magic and the meter). |
+| **collection** | Fairy ocarina, ocarina of time, gerudo card, double defense; **strength** (goron's bracelet, **gauntlets**: none / silver / gold); **other** (**scale**, **skulltulas**: the tokens' count, and they show in the collection screen, **ammo capacity**: the size of each bag and the wallet, **magic**: your magic and the meter). |
 | **quest items** | **spiritual stones** and **medallions**. |
 | **songs** | **normal songs** and **warp songs**. |
 | **dungeon items** | Per dungeon: map, compass, boss key, and **small keys** where it has them. |
