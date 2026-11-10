@@ -15,4 +15,7 @@ bool cct_reset_vertical_velocity(uintptr_t expected_actor);
 bool cct_on_ground(uintptr_t expected_actor, bool *grounded);
 bool cct_clear_fall_distance(uintptr_t expected_actor);
 
+/* The handle of Link's body in the physics world's body entries; 0 while it isn't known. */
+uint64_t cct_body_handle(void);
+
 #endif

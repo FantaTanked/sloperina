@@ -236,6 +236,7 @@ static void fa_hold_game(void)
   gfx_pause_icon = pause_display ? 1 : 0;
   for (;;) {
     sys_sleep_ns(FA_POLL_NS);
+    sys_frame();
     input_update();
     /* The button + L3 always runs again, even with the menu open: nothing is drawn while paused, so a
      * menu opened here can't be seen, and it would take the button. Checked before the menu gets it. */
@@ -327,6 +328,7 @@ static void frame(void)
     first_frame();
   }
   frames_run++;
+  sys_frame();
   input_update();
 
   fa_menu_was_open = menu_current != 0; /* an L that closes the menu isn't frame advance's */

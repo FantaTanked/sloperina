@@ -37,6 +37,8 @@ uint64_t sys_tick_freq(void);
 
 /* True if [addr, addr + size) is mapped with at least `perm`. Caches the last region. */
 bool sys_mapped(uintptr_t addr, size_t size, uint32_t perm);
+/* Forget the cached region; called once a frame. */
+void sys_frame(void);
 
 /* Read a pointer at addr if addr is readable; 0 otherwise. */
 uintptr_t sys_ptr(uintptr_t addr);

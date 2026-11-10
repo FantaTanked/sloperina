@@ -20,7 +20,7 @@ static uintptr_t function_at(unsigned offset)
 #define MAIN_FN(type, off) ((type)function_at(off))
 #include "../src/ootgz/cct.c"
 
-static uint64_t objects[11][1024];
+static uint64_t objects[12][1024]; /* 11: a second body */
 #define A(n) ((uintptr_t)objects[n])
 uintptr_t z64hd_main = 0x100000000ull;
 static const struct z64hd_build test_build = {
@@ -30,7 +30,7 @@ static const struct z64hd_build test_build = {
 const struct z64hd_build *z64hd_game = &test_build;
 static uintptr_t actor, blocked;
 static bool read_only;
-static unsigned toggles, moves, velocity_resets;
+static unsigned toggles, toggles2, moves, velocity_resets;
 static vec3f_t last_position, last_velocity;
 static void putp(int i, unsigned off, uintptr_t p) { memcpy((char *)objects[i] + off, &p, 8); }
 static void put32(int i, unsigned off, uint32_t v) { memcpy((char *)objects[i] + off, &v, 4); }
@@ -38,7 +38,7 @@ uintptr_t link_actor(void) { return actor; }
 bool sys_mapped(uintptr_t a, size_t n, uint32_t perm)
 {
   if (n > UINTPTR_MAX - a || (read_only && (perm & SYS_PERM_W))) return false;
-  for (unsigned i = 0; i < 11; i++)
+  for (unsigned i = 0; i < 12; i++)
     if (a >= A(i) && a + n <= A(i) + sizeof(objects[i]) && A(i) != blocked) return true;
   return false;
 }
@@ -56,6 +56,11 @@ bool sys_read32(uintptr_t a, uint32_t *v)
 void log_printf(const char *fmt, ...) { (void)fmt; }
 static void fake_no_hit(uintptr_t body, bool on)
 {
+  if (body == A(11)) { /* the second body: no queue, applied at once */
+    toggles2++;
+    putp(11, 0x70, on ? 1ull << 11 : 0);
+    return;
+  }
   assert(body == A(6));
   toggles++;
   putp(8, 0x100, 1ull << 19);
@@ -73,7 +78,7 @@ static void reset(void)
 {
   memset(objects, 0, sizeof(objects));
   owner = (controller_t){0}; actor = A(0); blocked = 0; read_only = false;
-  toggles = moves = velocity_resets = 0;
+  toggles = toggles2 = moves = velocity_resets = 0;
   putp(0, 0x270, A(1)); putp(1, 0x50, A(2)); putp(2, 0x20, A(3));
   putp(3, 0x10, A(4)); putp(4, 8, A(5));
   putp(5, 0, MAIN(Z64HD_VT_CCT_PROPERTY)); putp(5, 0x20, A(6)); putp(5, 0x58, A(4));
@@ -104,7 +109,7 @@ static void test_fall(void)
   assert(*(float *)(A(9) + 0x18D4) == y && *(float *)(A(9) + 0x18E0) == y);
   assert(*(float *)(A(9) + 0x190C) == 0 && *(float *)(A(10) + 0x189C) == 0);
   assert(*(float *)(A(10) + 0x1898) == y && *(uint32_t *)(A(9) + 0x18E8) == 0x7F7FFFFF);
-  static uint64_t before[11][1024];
+  static uint64_t before[12][1024];
   for (int invalid = 0; invalid < 4; invalid++) {
     reset();
     if (invalid == 0) blocked = A(9);
@@ -152,10 +157,31 @@ int main(void)
   actor = A(0) + 8; putp(0, 0x278, A(1)); /* new actor, same-looking reused controller */
   assert(!cct_noclip_move(&p)); cct_noclip_end();
   assert(toggles == 1 && !cct_noclip_active()); /* no writes to a replaced owner */
+  /* A ledge grab makes the second body current: the bypass follows, and both get their own modes back. */
+  for (int scenario = 0; scenario < 3; scenario++) {
+    reset();
+    putp(11, 0, MAIN(Z64HD_VT_CCT_BODY)); put32(4, 0x10, 2); putp(7, 8, A(11));
+    if (scenario == 2) putp(11, 0x70, 1ull << 11); /* already without collision */
+    assert(cct_noclip_begin() && toggles == 1 && toggles2 == 0);
+    putp(5, 0x20, A(11));
+    if (scenario == 0) { /* turned off before another frame moved him */
+      cct_noclip_end();
+      assert(!cct_noclip_active() && toggles == 2 && toggles2 == 0 && !no_hit(A(6)) && !no_hit(A(11)));
+      continue;
+    }
+    assert(cct_noclip_move(&p) && cct_noclip_active() && no_hit(A(11)));
+    assert(toggles2 == (scenario == 2 ? 0u : 1u));
+    putp(5, 0x20, A(6)); /* and back */
+    assert(cct_noclip_begin() && cct_noclip_move(&p) && toggles == 1);
+    putp(5, 0x20, A(11));
+    cct_noclip_end();
+    assert(!cct_noclip_active() && toggles == 2 && !no_hit(A(6)));
+    assert(no_hit(A(11)) == (scenario == 2) && toggles2 == (scenario == 2 ? 0u : 2u));
+  }
   reset(); assert(cct_noclip_begin()); p.y = NAN;
   assert(!cct_noclip_move(&p) && moves == 0);
   p.y = INFINITY; assert(!cct_noclip_move(&p));
   p.y = 100000; assert(!cct_noclip_move(&p));
-  puts("PASS: CCT chain/types, queued collision state, restore/retry, relocation, invalid lists/positions");
+  puts("PASS: CCT chain/types, queued collision state, restore/retry, body switches, relocation, invalid lists/positions");
   return 0;
 }

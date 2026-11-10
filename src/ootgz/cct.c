@@ -9,7 +9,11 @@
 
 typedef struct { uintptr_t actor, property, body; } controller_t;
 static controller_t owner;
-static bool original_no_hit;
+/* The controller has a body per stance and the game swaps which is current (a ledge grab, a climb),
+ * so each attached body's collision mode from before the bypass is kept. */
+#define MAX_BODIES 8
+static struct { uintptr_t body; bool no_hit; } saved[MAX_BODIES];
+static unsigned n_saved;
 static bool restore_wait_logged;
 
 static uintptr_t next(uintptr_t p, size_t offset)
@@ -57,6 +61,25 @@ static bool resolve(controller_t *out)
     return false;
   *out = (controller_t){ actor, p, body };
   return true;
+}
+
+/* The object just before the property in the controller chain holds the body's ID; a body entry's
+ * handle is that ID under a fixed tag. */
+#define BODY_ID 0x160
+#define BODY_HANDLE_TAG 0x5F7F3DCDull
+
+uint64_t cct_body_handle(void)
+{
+  if (!z64hd_game || !Z64HD_VT_CCT_PROPERTY)
+    return 0;
+  uintptr_t p = link_actor();
+  static const unsigned offsets[] = { 0x270, 0x50, 0x20, 0x10 };
+  for (unsigned i = 0; i < sizeof(offsets) / sizeof(*offsets); i++)
+    p = next(p, offsets[i]);
+  uint32_t id;
+  if (!p || sys_ptr(next(p, 8)) != MAIN(Z64HD_VT_CCT_PROPERTY) || !sys_read32(p + BODY_ID, &id) || !id)
+    return 0;
+  return BODY_HANDLE_TAG << 32 | id;
 }
 
 static bool same(controller_t a, controller_t b)
@@ -142,27 +165,66 @@ bool cct_clear_fall_distance(uintptr_t expected_actor)
 
 bool cct_noclip_active(void) { return owner.body != 0; }
 
+static unsigned attached_bodies(uintptr_t property, uintptr_t *out, unsigned max)
+{
+  uintptr_t lists = next(property, 0x58);
+  uint32_t count;
+  if (!lists || !sys_read32(lists + 0x10, &count))
+    return 0;
+  uintptr_t entries = next(lists, 0x18);
+  unsigned n = 0;
+  for (unsigned i = 0; i < count && n < max; i++)
+    out[n++] = sys_ptr(entries + i * sizeof(uintptr_t));
+  return n;
+}
+
+static bool body_switched(controller_t current)
+{
+  return owner.body && current.actor == owner.actor && current.property == owner.property &&
+         current.body != owner.body;
+}
+
+static void follow_body(controller_t current)
+{
+  log_printf("levitate: controller body %#lx -> %#lx (another stance), collision bypass follows",
+             (unsigned long)owner.body, (unsigned long)current.body);
+  owner = current;
+  if (!no_hit(owner.body))
+    set_no_hit(owner.body, true);
+}
+
 bool cct_noclip_begin(void)
 {
   controller_t current;
   if (!resolve(&current))
     return false;
-  if (owner.body)
+  if (owner.body) {
+    if (body_switched(current))
+      follow_body(current);
     return same(owner, current);
-  original_no_hit = no_hit(current.body);
+  }
+  uintptr_t bodies[MAX_BODIES];
+  n_saved = attached_bodies(current.property, bodies, MAX_BODIES);
+  bool original = no_hit(current.body);
+  for (unsigned i = 0; i < n_saved; i++)
+    saved[i].body = bodies[i], saved[i].no_hit = no_hit(bodies[i]);
   owner = current;
   restore_wait_logged = false;
-  if (!original_no_hit)
+  if (!original)
     set_no_hit(owner.body, true);
-  log_printf("levitate: controller %#lx, body %#lx, collision bypass on (was %d)",
-             (unsigned long)owner.property, (unsigned long)owner.body, original_no_hit);
+  log_printf("levitate: controller %#lx, body %#lx of %u, collision bypass on (was %d)",
+             (unsigned long)owner.property, (unsigned long)owner.body, n_saved, original);
   return true;
 }
 
 bool cct_noclip_move(const vec3f_t *position)
 {
   controller_t current;
-  if (!owner.body || !resolve(&current) || !same(owner, current) ||
+  if (!owner.body || !resolve(&current))
+    return false;
+  if (body_switched(current))
+    follow_body(current);
+  if (!same(owner, current) ||
       !(position->x > -100000 && position->x < 100000 &&
         position->y > -100000 && position->y < 100000 &&
         position->z > -100000 && position->z < 100000))
@@ -184,12 +246,21 @@ void cct_noclip_end(void)
     restore_wait_logged = true;
     return; /* Retry while idle; never forget a temporarily unreadable owner. */
   }
-  if (same(owner, current)) {
-    if (no_hit(owner.body) != original_no_hit)
-      set_no_hit(owner.body, original_no_hit);
-    log_printf("levitate: collision bypass restored to %d", original_no_hit);
+  if (current.actor == owner.actor && current.property == owner.property) {
+    /* Two passes: restoring one body's mode can carry over to another's. */
+    uintptr_t bodies[MAX_BODIES];
+    unsigned n = attached_bodies(current.property, bodies, MAX_BODIES), restored = 0;
+    for (int pass = 0; pass < 2; pass++)
+      for (unsigned i = 0; i < n_saved; i++)
+        for (unsigned j = 0; j < n; j++)
+          if (bodies[j] == saved[i].body && no_hit(saved[i].body) != saved[i].no_hit) {
+            set_no_hit(saved[i].body, saved[i].no_hit);
+            restored++;
+          }
+    log_printf("levitate: collision bypass off, %u bod%s restored", restored, restored == 1 ? "y" : "ies");
   } else {
     log_printf("levitate: controller changed/unavailable; skipped stale collision restore");
   }
   owner = (controller_t){0};
+  n_saved = 0;
 }

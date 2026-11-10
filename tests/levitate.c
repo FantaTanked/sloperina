@@ -5,7 +5,7 @@
 #include <string.h>
 #include "../src/ootgz/levitate.c"
 
-static double physics[9];
+static double physics[11]; /* the record and, at +0x50, its entry's handle */
 static unsigned char actor_memory[1024];
 static float cam[24];
 static vec3f_t drawn_pos;
@@ -19,6 +19,7 @@ static bool on_ground;
 bool cct_reset_vertical_velocity(uintptr_t a) { (void)a; velocity_resets++; return controller_available; }
 bool cct_clear_fall_distance(uintptr_t a) { (void)a; distance_resets++; return controller_available; }
 bool cct_on_ground(uintptr_t a, bool *grounded) { (void)a; *grounded = on_ground; return controller_available; }
+uint64_t cct_body_handle(void) { return 0; }
 bool cct_noclip_begin(void) { return controller_active = controller_available; }
 bool cct_noclip_active(void) { return controller_active; }
 bool cct_noclip_move(const vec3f_t *p) { (void)p; controller_moves++; return controller_available; }
@@ -40,7 +41,7 @@ bool gd_game_paused(bool *is_pause, int32_t *requests)
 bool sys_mapped(uintptr_t a, size_t n, uint32_t perm)
 {
   (void)perm;
-  return mapped && ((a >= (uintptr_t)physics && a + n <= (uintptr_t)(physics + 9)) ||
+  return mapped && ((a >= (uintptr_t)physics && a + n <= (uintptr_t)(physics + 11)) ||
                     (a >= (uintptr_t)cam && a + n <= (uintptr_t)(cam + 24)));
 }
 uint32_t sys_query_memory(sys_meminfo_t *m, uint64_t a) { (void)m; (void)a; return 1; }
