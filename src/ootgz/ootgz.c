@@ -27,6 +27,7 @@
 #include "airwall.h"
 #include "enemyhp.h"
 #include "overlayui.h"
+#include "divetest.h"
 #include "levitate.h"
 #include "settings.h"
 #include "warp.h"
@@ -364,6 +365,7 @@ static void frame(void)
   watches_frame(menu_current != 0);
   levitate_frame(menu_current != 0);
   position_frame(menu_current != 0);
+  divetest_frame(menu_current != 0);
   lock_frame();
   warp_frame();
   age_frame();

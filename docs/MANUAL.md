@@ -231,6 +231,12 @@ in-game; test normal jumps, sidehops, jumpslashes, scene changes, and restarts o
 
 ### 2.9 Debug
 
+**dive test: heights** and **dive test: moving** measure how deep Link goes into water by how he falls in. Start
+one with Link swimming at the surface (facing open water for the moving test) and leave the controls alone: it
+measures the surface, drops him again and again from set heights (heights: 1 to 192 above the surface; moving:
+16 and 96 above it, 0 to 13.6 units/s the way he faces), twice each, and writes each drop's fall time, speed
+going in, and deepest point to `log.txt` ("dive test: ..."). Choose it again to stop.
+
 #### 2.9.1 Heap
 
 How much memory the game has and uses (refreshed every second), and **view the heap in memory**.

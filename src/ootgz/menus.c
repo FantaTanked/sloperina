@@ -24,6 +24,7 @@
 #include "pouch.h"
 #include "lang.h"
 #include "sys.h"
+#include "divetest.h"
 #include "warp.h"
 #include "watches.h"
 #include "z64hd.h"
@@ -2679,10 +2680,24 @@ static void build_pause_research(void)
   menu_add_return(&m_pause_research);
 }
 
+static void act_dive_test(menu_item_t *it)
+{
+  divetest_toggle((int)it->data);
+  if (divetest_running())
+    menu_close(); /* it waits while the menu is open */
+}
+
 static void build_debug(void)
 {
   build_pause_research();
-  menu_init(&m_debug, "debug", 4);
+  menu_init(&m_debug, "debug", 6);
+  menu_item_t *dive = menu_add_action(&m_debug, "dive test: heights", act_dive_test, DIVETEST_HEIGHTS);
+  if (dive)
+    dive->hint = "Link swimming at the surface: drops him 1 to 192 up, twice each, and logs how deep he goes "
+                 "(L again: stop)";
+  menu_item_t *moving = menu_add_action(&m_debug, "dive test: moving", act_dive_test, DIVETEST_MOVING);
+  if (moving)
+    moving->hint = "as the heights test, from 16 and 96 up, moving 0 to 13.6 u/s the way he faces (face open water)";
   menu_add_submenu(&m_debug, "heap", &m_heap);
   menu_add_submenu(&m_debug, "memory", &memview_menu);
   menu_add_submenu(&m_debug, "pause research", &m_pause_research);
