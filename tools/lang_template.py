@@ -10,7 +10,8 @@ whose conversions don't match is ignored (lang.c TF). The font has ASCII only: a
 shown without the accent; other scripts can't be shown.
 
 The strings are the C string literals in src/ootgz that read as text (lower case words, spaces,
-punctuation), not identifiers or the game's names (Weapon_Sword_Kokiri, Dm_SY_BancChangeGo ...).
+punctuation), not identifiers or the game's names (Weapon_Sword_Kokiri, Dm_SY_BancChangeGo ...). A line
+marked /* not menu text */ is skipped: reasons that only go to the log, words looked for in the text.
 """
 import json
 import re
@@ -24,7 +25,8 @@ OUT = ROOT / "lang" / "template.json"
 LITERAL = re.compile(r'"((?:[^"\\\n]|\\.)*)"')  # a C string literal, with escapes
 SKIP_FILES = {"font.c", "lang.c"}
 SPEC = re.compile(r"%[-+ #0]*[0-9*]*(?:\.[0-9*]+)?(?:hh|h|ll|l|z)?[a-zA-Z%]")  # a printf conversion
-SKIP_LINE_STARTS = ("#include", "log_printf", "__asm__")  # lines whose strings are not translated
+SKIP_LINE_STARTS = ("#include", "#pragma", "_Static_assert", "log_printf", "__asm__")  # not translated
+NOT_TEXT = "/* not menu text */"
 
 
 def is_text(text):
@@ -41,6 +43,8 @@ def is_text(text):
         return False
     if ":/" in text or text.endswith((".json", ".ini", ".c", ".h")):
         return False
+    if " " not in text and re.fullmatch(r"[\w.-]+\.[a-z]+", text):  # a file name
+        return False
     return bool(re.fullmatch(r"[ -~]+", text))
 
 
@@ -54,6 +58,7 @@ def main():
         if path.name in SKIP_FILES:
             continue
         code = path.read_text(encoding="utf-8", errors="replace")
+        code = "\n".join(line for line in code.splitlines() if NOT_TEXT not in line)
         code = re.sub(r"/\*.*?\*/", "", code, flags=re.S)  # drop comments
         for line in code.splitlines():
             if is_skipped_line(line):
