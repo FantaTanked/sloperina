@@ -74,7 +74,10 @@ bool pouch_add_now(const char *item, bool equip_direct)
   /* as the OneShotAddOrRemovePouchContent event node calls it (Saria gives the ocarina with
    * IsEquipDirect = false) */
   bool ok = MAIN_FN(pouch_add_t, z64hd_game->pouch_add)(mgr, &name, 0, 1, 0, 0, 0, equip_direct, false) & 1;
-  uintptr_t target = sys_ptr(MAIN(z64hd_game->pouch_notify_ptr));
+  /* the notification, where this version has one (1.0.0 has none: its offsets are 0, and MAIN(0) is the
+   * module's own header, not a pointer) */
+  uintptr_t target = z64hd_game->pouch_notify && z64hd_game->pouch_notify_ptr
+                       ? sys_ptr(MAIN(z64hd_game->pouch_notify_ptr)) : 0;
   if (target)
     MAIN_FN(pouch_notify_t, z64hd_game->pouch_notify)((void *)target, &name, ok, 0);
   log_printf("add %s: %s", item, ok ? "ok" : "refused");
