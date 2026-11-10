@@ -15,6 +15,9 @@
 #include "age.h"
 #include "cheats.h"
 #include "gamedata.h"
+#include "gamefont.h"
+#include "gameimage.h"
+#include "uishader.h"
 #include "gfx.h"
 #include "input.h"
 #include "job.h"
@@ -23,6 +26,7 @@
 #include "menus.h"
 #include "airwall.h"
 #include "enemyhp.h"
+#include "overlayui.h"
 #include "levitate.h"
 #include "settings.h"
 #include "warp.h"
@@ -317,6 +321,8 @@ static void first_frame(void)
 {
   menus_build();
   settings_load();
+  gamefont_load(); /* the game's type for the panels (nativeui.c); gz's pixel font if it can't */
+  uishader_load(); /* the game's UI shader, to draw them on the GPU (gpuui.c) */
   log_printf("running on game %s (patch v%d, main %#lx)", z64hd_game->version,
              OOTGZ_PATCH_VERSION, (unsigned long)z64hd_main);
   menus_splash();
@@ -338,8 +344,9 @@ static void frame(void)
     watches_sync();
     menu_draw();
   }
-  airwall_frame();
-  enemyhp_frame();
+  bool overlays_on_gpu = overlayui_on_gpu(); /* lines and bars for the GPU, else rectangles */
+  airwall_frame(overlays_on_gpu);
+  enemyhp_frame(overlays_on_gpu);
   menus_research_frame();
   watches_frame(menu_current != 0);
   levitate_frame(menu_current != 0);
@@ -352,6 +359,8 @@ static void frame(void)
   cheats_frame();
   pouch_frame();
   job_frame();
+  if (gfx_style == GFX_STYLE_GAME)
+    gameimage_frame(); /* the game's pictures (its controllers, its menus' parts), a little each frame */
   settings_frame(menu_current != 0);
   settings_log_frame();
   fa_frame(); /* last: the frame's work is done before the game is held */

@@ -110,7 +110,8 @@ and you'll come out at the chosen place. Under **return**: the **current** map a
 |---|---|
 | **reload map** | Reloads the current map (at the age set in **link**). |
 | **collision** | See below. |
-| **enemy health** | A bar with **life/max** over each living enemy within 30 m of Link (red under a quarter); it goes when the enemy reaches 0. Enemies that haven't appeared yet (Wolfos still in the ground, Stalfos before they drop) have none, and none are drawn while the game is paused. |
+| **enemy health** | A bar with **life/max** over each living enemy within 30 m of Link (red under a quarter); it goes when the enemy reaches 0. Enemies that haven't appeared yet (Wolfos still in the ground, Stalfos before they drop) have none, and none are drawn while the game is paused. In the game's style a bar fades out while its enemy is hidden behind walls or other scenery. |
+| **through walls** | Also show the bars of enemies hidden behind the scenery (the game's style). |
 
 #### 2.3.1 Collision
 
@@ -120,14 +121,16 @@ and you'll come out at the chosen place. Under **return**: the **current** map a
 |---|---|
 | **show** | Draw them. **Cyan**: walls that stop Link. **Red**: a wall Link is inside. **Violet**: other kinds. |
 | **all kinds** | Also draw the walls meant for enemies, NPCs and objects. |
+| **through Link** | Also draw them where Link is in front of them (in the game's style they're hidden behind him). |
 
 The two lines under them count the walls in this map and those near you, and say whether Link is inside one
-(how deep, and which way the game will push him out). Outlines are drawn on top of everything, through scenery.
+(how deep, and which way the game will push him out). Outlines show through the scenery; in the game's style
+Link stays in front of them.
 
 ### 2.4 Cheats
 
-**infinite**: energy, rupees, magic, deku sticks, deku nuts, deku seeds, bombs, arrows, bombchus, magic beans:
-each kept full while ticked.
+**infinite**: energy, rupees, magic, deku sticks, deku nuts, deku seeds, bombs, arrows, bombchus, magic beans,
+business scrub seeds (30): each kept full while ticked.
 
 **player**: **2x movement speed** makes Link move twice as far each frame. **walk through walls**: hold the stick
 against a wall, rock or air wall and Link walks on through it at the height he was at, until you let go of the stick
@@ -138,10 +141,10 @@ maximum, see **watches > Lock JS Height**.)
 
 | Menu | What's in it |
 |---|---|
-| **items** | **child items** (deku sticks, boomerang, fairy slingshot, magic beans, child trade item), **adult items** (fairy bow, megaton hammer, fire / ice / light arrow, the **hookshot** switch: none / hookshot / longshot, adult trade item), **universal** (bombs, bombchus, deku nuts, Din's fire, Farore's wind, Nayru's love, ocarina, bottles A to E). |
+| **items** | **child items** (deku sticks, boomerang, fairy slingshot, magic beans, child trade item), **adult items** (fairy bow, megaton hammer, fire / ice / light arrow, the **hookshot** switch: none / hookshot / longshot, adult trade item), **universal** (bombs, bombchus, deku nuts, Din's fire, Farore's wind, Nayru's love, ocarina, bottles A to E, business scrub seed). |
 | **ammo** | How much of each kind of ammo you carry, up to your bag's size. **L** fills it. |
 | **equipment items** | **swords** (kokiri, master, and the **big sword** switch: none / giant's knife / broken giant's knife / biggoron's sword), **shields** (kokiri, hylian, mirror), **tunics** (goron, zora), **boots** (iron, hover), **other** (lenses of truth, echo gem, **mask slot**: one mask at a time). |
-| **collection** | Fairy ocarina, ocarina of time, gerudo card, double defense; **strength** (goron's bracelet, **gauntlets**: none / silver / gold); **other** (**scale**, **skulltulas**, **ammo capacity**: the size of each bag and the wallet, **magic**: your magic and the meter). |
+| **collection** | Fairy ocarina, ocarina of time, gerudo card, double defense; **strength** (goron's bracelet, **gauntlets**: none / silver / gold); **other** (**scale**, **skulltulas**: the tokens' count, and they show in the collection screen, **ammo capacity**: the size of each bag and the wallet, **magic**: your magic and the meter). |
 | **quest items** | **spiritual stones** and **medallions**. |
 | **songs** | **normal songs** and **warp songs**. |
 | **dungeon items** | Per dungeon: map, compass, boss key, and **small keys** where it has them. |

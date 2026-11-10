@@ -24,6 +24,10 @@ bool     input_combo(uint32_t mask);
 /* Pressed, or held long enough to repeat (menu navigation). */
 bool     input_repeat(uint32_t button);
 void     input_sticks(int32_t *lx, int32_t *ly, int32_t *rx, int32_t *ry);
+/* which controller the input came from last: a Pro Controller, two Joy-Cons apart (or in a grip), or
+ * Joy-Cons on the console (nn::hid's FullKey, JoyDual and Handheld styles) */
+enum { INPUT_PRO, INPUT_JOYCONS, INPUT_HANDHELD };
+int      input_controller(void);
 
 /* While true, the game sees no buttons or sticks. */
 extern bool input_block_game;

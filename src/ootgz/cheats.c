@@ -7,7 +7,7 @@
 
 const char *const cheat_names[CHEAT_COUNT] = {
   "energy", "rupees", "magic", "deku sticks", "deku nuts", "deku seeds", "bombs", "arrows",
-  "bombchus", "magic beans", "2x movement speed", "walk through walls",
+  "bombchus", "magic beans", "2x movement speed", "walk through walls", "business scrub seeds",
 };
 bool cheats[CHEAT_COUNT];
 
@@ -16,6 +16,11 @@ bool cheats[CHEAT_COUNT];
 #define HASH_WALLET_CAPACITY 0xE0010A50u
 #define HASH_MAGIC           0x76B18200u /* Current magic */
 #define HASH_MAGIC_CAPACITY  0x12D63A97u /* Magic capacity */
+/* the business scrub seed: PouchData.Item_ScrubBusinessSeed.StockNum, IsGet.Item_ScrubBusinessSeed, and its most
+ * (FixedMaxNum in its PouchContentParam, Pack/Actor/Pouch_ScrubBusinessSeed.pack; the beans' is the 10 below) */
+#define HASH_SCRUB_SEEDS     0x600E29EBu
+#define HASH_SCRUB_SEED_GOT  0xCFBB16F6u
+#define SCRUB_SEEDS_MAX      30
 
 /* The ammo cheats, CHEAT_STICKS..CHEAT_BEANS: each count is filled to its capacity field, or to a
  * fixed maximum for those without one. */
@@ -128,5 +133,11 @@ void cheats_frame(void)
     if (capacity_hash && !gd_get_int(capacity_hash, &target))
       continue;
     fill_to(ammo_fields[cheat - CHEAT_STICKS].count_hash, target);
+  }
+  if (cheats[CHEAT_SCRUB_SEEDS]) { /* got as well: without it the item screen shows the slot empty */
+    bool got;
+    fill_to(HASH_SCRUB_SEEDS, SCRUB_SEEDS_MAX);
+    if (gd_get_bool(HASH_SCRUB_SEED_GOT, &got) && !got)
+      gd_set_bool(HASH_SCRUB_SEED_GOT, true);
   }
 }

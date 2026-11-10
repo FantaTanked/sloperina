@@ -884,5 +884,30 @@ Entries 1 to 4 and 14 were empty; 35 and 40 had no name getter.
   (Wolfos still in the ground, Stalfos before they drop, Poe sisters, Skulltulas before they come down) or 3, and goes
   to **4** (or 5) when it appears. Found by logging Wolfos before and after they jumped out, the two that stayed
   hidden as a control: also `+0x30` 8 -> 0, `+0x6E4` ffffffff -> 0 and `+0x518` 0x100 -> 0x42f changed with it.
+- **1.0.0 (v0):** the manager is `*(main+0x4E20930)` (the slot's neighbours `frame_counter` and `camera_ptr` sit
+  0x70460 below v131072's, and so does it): its singleton is made at `0xCCE6B0` (0x490 bytes), its constructor
+  `0xCCE730` makes a mutex at `+0x00`, zeroes `+0x28` and `+0x40` and leaves the tree's root at `+0x38` null. The
+  actors' fields are v131072's: 42 functions read the life through `+0x270`, `+0x2B8` and `+0x1C10` / `+0x1C18`,
+  hundreds the position as floats at `+0x31C`. Without it enemy health showed nothing on 1.0.0.
 - A dungeon keeps all its rooms' actors: Forest Temple had 32+ live enemies, so scene > enemy health keeps the 32
   nearest Link within 30 m. Its summary (`actors:` lines) goes to the log every 300 frames while it's on.
+
+### 9.6 The scene's depth (1.0.0, nxnative; checked 10th November 2026)
+- **The texture:** Depth32F (NVN `0x34`) at the render resolution: 1536x864, smaller under dynamic resolution
+  (1457x820 seen), at offset 0 of the game's 305 MB render-target pool (flags `0x2a1`). The texture *object* is
+  new every frame or two (16+ addresses, its texture-pool ID with it): never keep it, take it from the game's
+  calls. Cleared to 1, test LESS, depth range 0..1, GL style (near = -w), no jitter in the projection.
+- **Its copy:** right after its depth pre-pass the game copies it whole into a second Depth32F of the same size
+  (`nvnCommandBufferCopyTextureToTexture`), then a half-size one the same way: one each per gameplay present.
+  scenedepth.c takes the first full-size Depth32F copy since the last present (and a smaller one only if it's
+  at least half the area of the last). The pre-pass is recorded on several command buffers, each object in an
+  occlusion query (`ReportCounter` SAMPLES_PASSED / `ResetCounter`); no pass of the characters alone was found.
+- **Later:** after its last use (the upscaler) the game places small HUD targets at the depth's own pool offset
+  (177x40 RGBA8 at +0 ... +0x24600, 192x192 R8 at +0): on the console they overwrite its top left before the
+  present (nxnative keeps textures of different formats apart, so there it stays whole). Read it at the copy.
+- **Conversion:** the camera (`camera()`) holds sead's PerspectiveProjection at `+0x90`: the projection at `+0x9C`,
+  device z scale / offset `+0x120` / `+0x124` (1, 0), near `+0x128` (0.1), far `+0x12C` (25000), vertical fov
+  `+0x130`, aspect `+0x140`. Distance ahead = n f / (f - d (f - n)); d = f (1 - n / z) / (f - n) (`view_depth`).
+  Link's torso read 3.41 m where the CPU projection put his middle at 3.54.
+- **Memory:** the game's heap gave one 9.6 MB block but not 15 MB (a Depth32F the picture's size at 2560x1440),
+  nor a second 5.3 MB block next to the 5.3 MB depth; held 1 MB blocks ran out at about 10 in gameplay.

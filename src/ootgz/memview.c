@@ -336,6 +336,7 @@ void memview_build(menu_t *watches)
     address->text = address_text;
     address->on_change = page;
     address->cursor = address_cursor;
+    address->grid = true;
     address->edit = address_edit;
     address->hint = "L: type an address   d-left/right: a page back/on";
     address->edit_hint = "d-left/right: digit   d-up/down: change   L: go";
@@ -350,6 +351,7 @@ void memview_build(menu_t *watches)
   if (arrows) {
     arrows->text = header_text;
     arrows->cursor = arrows_cursor;
+    arrows->grid = true; /* the header: its columns over the rows' bytes */
     arrows->press = arrows_press;
     arrows->press_repeat = true;
     arrows->n_parts = 2;
@@ -363,6 +365,7 @@ void memview_build(menu_t *watches)
       row->text = row_text;
       row->on_change = page;
       row->cursor = row_cursor;
+      row->grid = true;
       row->edit = row_edit;
       row->hint = "L: edit this row   d-left/right: a page back/on";
       row->edit_hint = "d-l/r: move  d-u/d: change  L on address: watch it";

@@ -455,18 +455,30 @@ void menu_item_line(menu_item_t *item, char *buf, int len)
 
 static void item_line(menu_item_t *item, char *buf, int len)
 {
-  char value[96] = "";
+  char value[96] = "", pictured[96];
+  const char *label = T(item->label);
+  int picture = item->picture;
+  if (picture && item->kind == MI_OPTION && item->choice_pictures) { /* the chosen one's picture */
+    int choice = item->get_option(item);
+    if (choice >= 0 && choice < item->n_choices && item->choice_pictures[choice])
+      picture = item->choice_pictures[choice];
+  }
+  if (picture && gfx_style == GFX_STYLE_GAME) { /* the game's picture of the item before its label */
+    snprintf(pictured, sizeof(pictured), "%s%c%c %s", item->picture_pad ? "  " : "", GFX_PICTURE,
+             GFX_PICTURE_ID(picture), label);
+    label = pictured;
+  }
   switch (item->kind) {
     case MI_SUBMENU:
-      snprintf(buf, len, "%s >", T(item->label));
+      snprintf(buf, len, "%s >", label);
       return;
     case MI_CHECK: {
       char box[3] = { item->get_check(item) ? GFX_CHECK_ON : GFX_CHECK_OFF, GFX_WIDE_REST, 0 };
       if (item->text) {
         item->text(item, value, sizeof(value));
-        snprintf(buf, len, "%s%-13s %s", box, T(item->label), value);
+        snprintf(buf, len, "%s%-13s %s", box, label, value);
       } else {
-        snprintf(buf, len, "%s%s", box, T(item->label));
+        snprintf(buf, len, "%s%s", box, label);
       }
       return;
     }
@@ -478,7 +490,7 @@ static void item_line(menu_item_t *item, char *buf, int len)
         snprintf(value, sizeof(value), "%s", T(item->choices[choice]));
       else if (item->choice_text)
         item->choice_text(item, choice, value, sizeof(value));
-      snprintf(buf, len, "%s  < %s >", T(item->label), value);
+      snprintf(buf, len, "%s  < %s >", label, value);
       return;
     }
     case MI_NUMBER: {
@@ -492,9 +504,9 @@ static void item_line(menu_item_t *item, char *buf, int len)
       int32_t max = item->num_max ? item->num_max(item) : NUM_UNKNOWN;
       /* "/ max" only for a plain number whose maximum is known */
       if (item->num_max && max != NUM_UNKNOWN && number != NUM_UNKNOWN && !item->text)
-        snprintf(buf, len, "%s  < %s > / %d", T(item->label), value, (int)max);
+        snprintf(buf, len, "%s  < %s > / %d", label, value, (int)max);
       else
-        snprintf(buf, len, "%s  < %s >", T(item->label), value);
+        snprintf(buf, len, "%s  < %s >", label, value);
       return;
     }
     case MI_TEXT:
@@ -505,9 +517,9 @@ static void item_line(menu_item_t *item, char *buf, int len)
         item->text(item, buf, len);
       } else if (item->text) {
         item->text(item, value, sizeof(value));
-        snprintf(buf, len, "%s  %s", T(item->label), value);
+        snprintf(buf, len, "%s  %s", label, value);
       } else {
-        snprintf(buf, len, "%s", T(item->label));
+        snprintf(buf, len, "%s", label);
       }
       return;
   }
@@ -769,6 +781,16 @@ static void draw_item(menu_t *menu, int index, int y)
   }
 }
 
+/* what an item's row is, for the game's style (gfx_row) */
+static int row_kind(const menu_item_t *item)
+{
+  int grid = item->grid ? GFX_ROW_GRID : 0;
+  if (item->kind == MI_TEXT)
+    return (item->text == heading_text ? GFX_ROW_HEADING : GFX_ROW_LINE) | grid;
+  int indent = item->indent ? GFX_ROW_INDENT : 0;
+  return (item->kind == MI_SUBMENU ? GFX_ROW_ITEM | GFX_ROW_OPENS : GFX_ROW_ITEM) | grid | indent;
+}
+
 void menu_draw(void)
 {
   menu_t *menu = menu_current;
@@ -779,6 +801,10 @@ void menu_draw(void)
     gfx_begin();
     gfx_text(0, 0, GFX_TITLE, T(menu->title));
     gfx_text(ITEM_COL, 2, GFX_DIM, hint ? hint : "");
+    gfx_row(0, GFX_ROW_TITLE);
+    gfx_row(1, GFX_ROW_GAP);
+    gfx_row(2, GFX_ROW_HINT);
+    gfx_hint(hint);
     gfx_end();
     return;
   }
@@ -819,18 +845,29 @@ void menu_draw(void)
   update_scroll(menu, pinned, visible);
 
   gfx_begin();
-  for (int k = 0; k < title_rows; k++)
+  for (int k = 0; k < title_rows; k++) {
     gfx_text(0, k, GFX_TITLE, title_lines[k]);
+    gfx_row(k, GFX_ROW_TITLE);
+  }
+  gfx_row(first_item_y - 1, GFX_ROW_GAP);
   for (int row = 0; row < pinned + visible; row++) {
     int index = row < pinned ? row : menu->scroll + row - pinned;
     if (index >= menu->n_items)
       break;
+    /* a heading never ends the list: with nothing of its group under it, its row stays empty */
+    if (row == pinned + visible - 1 && index + 1 < menu->n_items && menu->items[index].text == heading_text) {
+      gfx_row(first_item_y + row, GFX_ROW_LINE);
+      break;
+    }
     draw_item(menu, index, first_item_y + row);
+    gfx_row(first_item_y + row, row_kind(&menu->items[index]));
   }
   if (menu->scroll > pinned)
     gfx_text(0, first_item_y + pinned, GFX_DIM, "^");
   if (menu->scroll + visible < menu->n_items)
     gfx_text(0, first_item_y + pinned + visible - 1, GFX_DIM, "v");
+  if (menu->n_items - pinned > visible) /* the game's style draws a scroll bar */
+    gfx_scroll(first_item_y + pinned, visible, menu->n_items - pinned, menu->scroll - pinned);
 
   /* The panel keeps one size while in this menu (a size change redraws it, which flashes): the hint
    * rows are always there, and the width is the widest line or hint of any item, not just the
@@ -839,6 +876,12 @@ void menu_draw(void)
   int scrolled_shown = menu->n_items - menu->scroll < visible ? menu->n_items - menu->scroll : visible;
   int hint_y = first_item_y + pinned + scrolled_shown + 1;
   int n_hint_lines = wrap_text(hint, wrap_w, hint_lines, HINT_MAX_ROWS, 0);
+  /* the game's style wraps the hint itself, and leaves the hint's place out of a menu that has none */
+  bool hints = hint_w > 0;
+  gfx_row(hint_y - 1, hints ? GFX_ROW_GAP : GFX_ROW_SKIP);
+  for (int k = 0; k < hint_rows; k++)
+    gfx_row(hint_y + k, hints ? GFX_ROW_HINT : GFX_ROW_SKIP);
+  gfx_hint(hint);
   for (int k = 0; k < n_hint_lines; k++)
     gfx_text(ITEM_COL, hint_y + k, GFX_DIM, hint_lines[k][0] ? hint_lines[k] : filler);
   if (n_hint_lines < hint_rows) /* the rows the longest hint takes stay the panel's */

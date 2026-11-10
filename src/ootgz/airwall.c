@@ -1,17 +1,21 @@
-/* Air walls: port of airwall.py (FINDINGS §5.11), drawn as dotted outlines.
+/* Air walls: port of airwall.py (FINDINGS §5.11), drawn as outlines.
  *
  * Walls come from data.c (airwalls.json, built from the map layouts by tools/airwalls.py). A wall's
  * world point for a local shape point p is t + R (s * p), with R = Rz Ry Rx from its rotation, as
- * sead's makeR. Each frame the walls within AW_RANGE of the camera are projected with the game's
- * camera (+0x38 position, +0x44 look-at, +0x130 vertical fov, +0x140 aspect) and their edges turned
- * into rectangles, nearest wall first, which nvn.c draws by clearing them (no shaders). Edges within
- * about 19 degrees of level or upright are solid lines of a few long rectangles (a staircase); steeper
+ * sead's makeR; the points and edges are worked out once per map. Each frame the walls within AW_RANGE
+ * of the camera are projected with the game's camera (+0x38 position, +0x44 look-at, +0x130 vertical
+ * fov, +0x140 aspect), nearest wall first, and their edges handed to the render thread (publish.h) in the
+ * form it draws: in the game's style lines, which overlayui.c draws smooth on the GPU; in gz's (or if the
+ * GPU path can't start) rectangles, which nvn.c draws by clearing them (no shaders). Edges within about
+ * 19 degrees of level or upright are then solid lines of a few long rectangles (a staircase); steeper
  * ones are dots, which takes fewer clears than a staircase there. (FINDINGS §5.11 had see-through
- * faces; here only the outlines, and like the Python view they show through scenery.) */
+ * faces; here only the outlines. Like the Python view they show through scenery; in the game's style
+ * Link stays in front of them: overlayui.c, scenedepth.c.) */
 #include "airwall.h"
 
 #include "data.h"
 #include "gamedata.h"
+#include "age.h"
 #include "link.h"
 #include "lang.h"
 #include "publish.h"
@@ -22,7 +26,7 @@ float sinf(float x); /* from sdk */
 float cosf(float x);
 float sqrtf(float x);
 
-bool airwalls_shown, airwalls_all;
+bool airwalls_shown, airwalls_all, airwalls_xray;
 
 #define AW_RANGE 60.0f
 #define MAX_WALLS 512
@@ -35,7 +39,18 @@ bool airwalls_shown, airwalls_all;
 #define DOT_SPACING 6.0f  /* reference pixels between dots */
 #define LINE_WIDTH 2.0f   /* reference pixels: a line's thickness, one staircase step at most */
 #define STRAIGHT 0.344f   /* tan 19 degrees: up to this slope a staircase takes fewer clears */
-#define NEAR_PLANE 0.05f
+#define NEAR_PLANE 0.05f  /* or the camera's, if farther */
+/* A line hides where Link is nearer than it by more than this (metres, and of its distance); the scenery never
+ * hides it (the walls' edges lie in its surfaces, a little under them here and there, and are wanted through
+ * walls anyway). Link is what of the scene is in his box: from LINK_FEET over his feet to his height, LINK_R
+ * each way round him (with his shield) */
+#define DEPTH_MARGIN_M 0.03f
+#define DEPTH_MARGIN_SHARE 0.003f
+#define LINK_FEET 0.04f /* the ground under him is this much lower than what's taken for him (his boots are) */
+#define LINK_TOP_CHILD 1.45f
+#define LINK_TOP_ADULT 2.05f
+#define LINK_R_CHILD 0.35f
+#define LINK_R_ADULT 0.45f
 #define PHYS_Y 0.585f     /* Link's physics position is this far above his drawn one */
 #define FACE_UPRIGHT 0.7f /* a face normal with more height than this points up (or down) */
 
@@ -318,7 +333,11 @@ void airwall_link_text(char *buf, int len)
 
 static aw_dot_t dots[PUBLISH_BUFFERS][MAX_DOTS];
 static int n_dots[PUBLISH_BUFFERS];
+#define MAX_LINES 2048 /* more than overlayui.c draws */
+static aw_line_t lines[PUBLISH_BUFFERS][MAX_LINES];
+static int n_lines[PUBLISH_BUFFERS];
 static publish_t published = PUBLISH_INIT;
+static int taken = -1; /* the render thread's, from airwall_take to airwall_release */
 static int n_walls_near;
 
 /* 0..size to 0..65535, clamped */
@@ -340,16 +359,16 @@ static void add_rect(aw_dot_t *out, int *n, float ax, float ay, float bx, float 
 }
 
 /* Cut the line va-vb (camera space) at the near plane. False if it's all behind it. */
-static bool clip_near(float va[3], float vb[3])
+static bool clip_near(float va[3], float vb[3], float near)
 {
-  if (va[2] < NEAR_PLANE && vb[2] < NEAR_PLANE)
+  if (va[2] < near && vb[2] < near)
     return false;
-  if (va[2] < NEAR_PLANE || vb[2] < NEAR_PLANE) {
-    float t = (NEAR_PLANE - va[2]) / (vb[2] - va[2]);
+  if (va[2] < near || vb[2] < near) {
+    float t = (near - va[2]) / (vb[2] - va[2]);
     float cut[3];
     for (int i = 0; i < 3; i++)
       cut[i] = va[i] + t * (vb[i] - va[i]);
-    if (va[2] < NEAR_PLANE)
+    if (va[2] < near)
       memcpy(va, cut, sizeof(cut));
     else
       memcpy(vb, cut, sizeof(cut));
@@ -357,8 +376,9 @@ static bool clip_near(float va[3], float vb[3])
   return true;
 }
 
-/* Cut the line (x0, y0)-(x1, y1) to the reference picture (Liang-Barsky). False if it's all outside. */
-static bool clip_to_picture(float *x0, float *y0, float *x1, float *y1)
+/* Cut the line (x0, y0)-(x1, y1) to the reference picture (Liang-Barsky): *t0, *t1 where along it the
+ * cut ends are. False if it's all outside. */
+static bool clip_to_picture(float *x0, float *y0, float *x1, float *y1, float *cut0, float *cut1)
 {
   float dx = *x1 - *x0, dy = *y1 - *y0;
   float t0 = 0, t1 = 1;
@@ -387,7 +407,15 @@ static bool clip_to_picture(float *x0, float *y0, float *x1, float *y1)
   *y1 = *y0 + t1 * dy;
   *x0 += t0 * dx;
   *y0 += t0 * dy;
+  *cut0 = t0;
+  *cut1 = t1;
   return true;
+}
+
+/* a point `ahead` metres in front of the camera, as deep as the scene must be nearer than for it to hide */
+static float line_depth(const view_cam_t *cam, float ahead)
+{
+  return view_depth(cam, ahead - DEPTH_MARGIN_M - DEPTH_MARGIN_SHARE * ahead);
 }
 
 /* A line on the picture: near level or upright, a staircase of long rectangles; otherwise dots. */
@@ -426,13 +454,87 @@ static void add_line(aw_dot_t *out, int *n, float x0, float y0, float x1, float 
   }
 }
 
-/* The edge a-b (world points), projected, clipped and added to out[*n...]. */
-static void add_edge_dots(aw_dot_t *out, int *n, const view_cam_t *cam, const float a[3], const float b[3], uint8_t color)
+/* The edge a-b (world points), projected, clipped and added as a line to line_out[*n_line], or (no
+ * line_out) as rectangles to out[*n...]. */
+/* Link's box for this frame's lines (airwall_link_box) */
+typedef struct { bool ok; float rect[4], front[3], back[3], ground[3]; } link_box_t;
+
+/* the plane through three points on the picture (x, y, depth): depth = g[0] x + g[1] y + g[2]; false if they're
+ * in a line */
+static bool plane_through(const float p[3][3], float g[3])
+{
+  float ax = p[1][0] - p[0][0], ay = p[1][1] - p[0][1], ad = p[1][2] - p[0][2];
+  float bx = p[2][0] - p[0][0], by = p[2][1] - p[0][1], bd = p[2][2] - p[0][2];
+  float det = ax * by - ay * bx;
+  if (det > -1e-9f && det < 1e-9f)
+    return false;
+  g[0] = (ad * by - ay * bd) / det;
+  g[1] = (ax * bd - ad * bx) / det;
+  g[2] = p[0][2] - g[0] * p[0][0] - g[1] * p[0][1];
+  return true;
+}
+
+static link_box_t link_boxes[PUBLISH_BUFFERS]; /* a frame's each, with its lines (publish.h) */
+
+/* the plane through o, o + u and o + v (world points) as depth on the picture (plane_through); false if a
+ * point is behind the camera */
+static bool depth_plane(const view_cam_t *cam, const float o[3], const float u[3], const float v[3], float g[3])
+{
+  float on[3][3];
+  for (int i = 0; i < 3; i++) {
+    const float *d = i == 1 ? u : v;
+    float w[3] = { o[0] + (i ? d[0] : 0), o[1] + (i ? d[1] : 0), o[2] + (i ? d[2] : 0) }, c[3];
+    view_point(cam, w, c);
+    if (c[2] <= cam->near)
+      return false;
+    view_screen(cam, c, &on[i][0], &on[i][1]);
+    on[i][2] = cam->far * (1 - cam->near / c[2]) / (cam->far - cam->near); /* unclamped: it's a plane */
+  }
+  return plane_through(on, g);
+}
+
+/* Link's box, square to the camera: LINK_R to its right and left, ahead and behind, from LINK_FEET over his feet
+ * to his height. On the picture: the rectangle round it, and its front, back and floor as depth planes. */
+static void find_link_box(const view_cam_t *cam, link_box_t *box)
+{
+  box->ok = false;
+  vec3f_t p;
+  if (!link_drawn_pos(&p))
+    return;
+  bool adult = age_current() == AGE_ADULT;
+  float r = adult ? LINK_R_ADULT : LINK_R_CHILD, top = adult ? LINK_TOP_ADULT : LINK_TOP_CHILD;
+  /* the camera's right is level; ahead, level, is (right z, 0, -right x) */
+  const float right[3] = { cam->right[0], 0, cam->right[2] }, ahead[3] = { cam->right[2], 0, -cam->right[0] };
+  const float up[3] = { 0, 1, 0 };
+  float x0 = 1, y0 = 1, x1 = 0, y1 = 0;
+  for (int c = 0; c < 8; c++) {
+    float sr = c & 1 ? r : -r, sa = c & 2 ? r : -r, h = c & 4 ? top : LINK_FEET;
+    float w[3] = { p.x + sr * right[0] + sa * ahead[0], p.y + h, p.z + sr * right[2] + sa * ahead[2] }, v[3], sx, sy;
+    view_point(cam, w, v);
+    if (v[2] < cam->near)
+      return; /* the camera's in it */
+    view_screen(cam, v, &sx, &sy);
+    x0 = sx < x0 ? sx : x0, x1 = sx > x1 ? sx : x1;
+    y0 = sy < y0 ? sy : y0, y1 = sy > y1 ? sy : y1;
+  }
+  x0 = x0 < 0 ? 0 : x0, y0 = y0 < 0 ? 0 : y0, x1 = x1 > 1 ? 1 : x1, y1 = y1 > 1 ? 1 : y1;
+  if (x1 <= x0 || y1 <= y0)
+    return;
+  float front[3] = { p.x - r * ahead[0], p.y, p.z - r * ahead[2] }, back[3] = { p.x + r * ahead[0], p.y, p.z + r * ahead[2] };
+  float floor[3] = { p.x, p.y + LINK_FEET, p.z };
+  link_box_t made = { true, { x0, y0, x1, y1 }, { 0 }, { 0 }, { 0 } };
+  if (depth_plane(cam, front, right, up, made.front) && depth_plane(cam, back, right, up, made.back) &&
+      depth_plane(cam, floor, right, ahead, made.ground))
+    *box = made;
+}
+
+static void add_edge_dots(aw_dot_t *out, int *n, aw_line_t *line_out, int *n_line, const view_cam_t *cam,
+                          const float a[3], const float b[3], uint8_t color)
 {
   float va[3], vb[3];
   view_point(cam, a, va);
   view_point(cam, b, vb);
-  if (!clip_near(va, vb))
+  if (!clip_near(va, vb, cam->near > NEAR_PLANE ? cam->near : NEAR_PLANE))
     return;
   float x0, y0, x1, y1;
   view_screen(cam, va, &x0, &y0);
@@ -441,9 +543,19 @@ static void add_edge_dots(aw_dot_t *out, int *n, const view_cam_t *cam, const fl
   x1 *= REF_WIDTH;
   y0 *= REF_HEIGHT;
   y1 *= REF_HEIGHT;
-  if (!clip_to_picture(&x0, &y0, &x1, &y1))
+  float t0, t1;
+  if (!clip_to_picture(&x0, &y0, &x1, &y1, &t0, &t1))
     return;
-  add_line(out, n, x0, y0, x1, y1, color);
+  if (line_out) {
+    /* the depth is linear along the line on the picture (as 1 / distance is): the cut ends' from the ends' */
+    float da = line_depth(cam, va[2]), db = line_depth(cam, vb[2]);
+    if (*n_line < MAX_LINES)
+      line_out[(*n_line)++] = (aw_line_t){ x0 / REF_WIDTH, y0 / REF_HEIGHT, x1 / REF_WIDTH, y1 / REF_HEIGHT,
+                                           va[2] < vb[2] ? va[2] : vb[2], da + t0 * (db - da), da + t1 * (db - da),
+                                           color };
+  } else if (*n < MAX_DOTS) {
+    add_line(out, n, x0, y0, x1, y1, color);
+  }
 }
 
 /* --- hidden while the game is paused ------------------------------------------------------------- */
@@ -499,38 +611,67 @@ static int sort_near_walls(const view_cam_t *cam)
   return count;
 }
 
-void airwall_frame(void)
+void airwall_frame(bool gpu)
 {
   update_map();
   check_link();
-  int next = publish_next(&published);
-  int n = 0;
+  int f = publish_next(&published), n = 0, nl = 0;
   n_walls_near = 0;
+  link_boxes[f].ok = false;
   bool draw = airwalls_shown && current_map && !game_is_paused();
   view_cam_t cam;
   if (draw && view_camera(&cam)) {
-    /* nearest wall first, so the dot budget goes to what's close */
+    /* nearest wall first, so the budget goes to what's close */
     n_walls_near = sort_near_walls(&cam);
-    for (int k = 0; k < n_walls_near && n < MAX_DOTS; k++) {
+    for (int k = 0; k < n_walls_near && (gpu ? nl < MAX_LINES : n < MAX_DOTS); k++) {
       int i = near_order[k];
       const airwall_t *wall = map_wall(i);
       uint8_t color = i == link_wall ? AW_INSIDE : wall->kind == WALL_KIND_BLOCKS ? AW_BLOCKS : AW_OTHER;
       for (int e = wall_geo[i].first_edge; e < wall_geo[i].first_edge + wall_geo[i].n_edges; e++)
-        add_edge_dots(dots[next], &n, &cam, points[edges[e][0]], points[edges[e][1]], color);
+        add_edge_dots(dots[f], &n, gpu ? lines[f] : 0, &nl, &cam, points[edges[e][0]], points[edges[e][1]], color);
     }
+    if (gpu && nl)
+      find_link_box(&cam, &link_boxes[f]);
   }
-  n_dots[next] = n;
-  publish_set(&published, n ? next : -1);
+  n_dots[f] = n;
+  n_lines[f] = nl;
+  publish_set(&published, n || nl ? f : -1);
+}
+
+void airwall_take(void)
+{
+  taken = publish_take(&published);
+}
+
+const aw_line_t *airwall_lines(int *n)
+{
+  *n = taken < 0 ? 0 : n_lines[taken];
+  return taken < 0 ? 0 : lines[taken];
+}
+
+bool airwall_link_box(float rect[4], float front[3], float back[3], float ground[3])
+{
+  if (taken < 0 || !link_boxes[taken].ok)
+    return false;
+  const link_box_t *box = &link_boxes[taken];
+  for (int i = 0; i < 4; i++)
+    rect[i] = box->rect[i];
+  for (int i = 0; i < 3; i++)
+    front[i] = box->front[i], back[i] = box->back[i], ground[i] = box->ground[i];
+  return true;
 }
 
 const aw_dot_t *airwall_published(int *n)
 {
-  int buffer = publish_take(&published);
-  *n = buffer < 0 ? 0 : n_dots[buffer];
-  return buffer < 0 ? 0 : dots[buffer];
+  *n = taken < 0 ? 0 : n_dots[taken];
+  return taken < 0 ? 0 : dots[taken];
 }
 
-void airwall_release(void) { publish_release(&published); }
+void airwall_release(void)
+{
+  taken = -1;
+  publish_release(&published);
+}
 
 void airwall_summary(char *buf, int len)
 {

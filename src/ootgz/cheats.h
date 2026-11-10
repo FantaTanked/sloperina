@@ -8,7 +8,8 @@
 typedef enum {
   CHEAT_ENERGY, CHEAT_RUPEES, CHEAT_MAGIC, CHEAT_STICKS, CHEAT_NUTS, CHEAT_SEEDS, CHEAT_BOMBS,
   CHEAT_ARROWS, CHEAT_BOMBCHUS, CHEAT_BEANS, CHEAT_SPEED /* levitate.c */,
-  CHEAT_WALLS /* levitate.c */, CHEAT_COUNT /* append only: settings.ini keeps a bit per cheat */
+  CHEAT_WALLS /* levitate.c */, CHEAT_SCRUB_SEEDS /* shown after the beans */,
+  CHEAT_COUNT /* append only: settings.ini keeps a bit per cheat */
 } cheat_t;
 
 extern const char *const cheat_names[CHEAT_COUNT];

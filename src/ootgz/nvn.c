@@ -9,6 +9,7 @@
  *   nvnQueuePresentTexture       before the game's present, copy our panels into the texture being
  *                                presented
  *   nvnDeviceInitialize          remember the device
+ *   nvnCommandBufferCopyTextureToTexture  the game's copy of its scene depth: ours after it (scenedepth.c)
  *
  * Drawing uses no shaders (Switch 2 shader binaries can't be built with public tools): the text is
  * rasterised on the CPU into a buffer in our own memory pool, in the swapchain's format, and copied
@@ -20,26 +21,21 @@
  * (RGB10A2); MemoryPoolBuilderSetFlags gets 0x21, 0x12, 0x22, 0x24, 0xA1..., all NVN 1 values.
  */
 #include "nvn.h"
+#include "nvnapi.h"
 
 #include "font.h"
 #include "airwall.h"
 #include "enemyhp.h"
 #include "gfx.h"
+#include "gamefont.h"
+#include "gpuui.h"
+#include "overlayui.h"
+#include "nativeui.h"
+#include "scenedepth.h"
+#include "uishader.h"
 #include "sys.h"
 
-/* --- NVN types (opaque; sizes are NVN 1's, storage is oversized in case NVN 2 grew) ------- */
-
-typedef struct nvn_device nvn_device_t;
-typedef struct nvn_queue nvn_queue_t;
-typedef struct nvn_window nvn_window_t;
-typedef struct nvn_texture nvn_texture_t;
-typedef uint64_t nvn_addr_t;
-typedef uint64_t nvn_handle_t;
-typedef struct { int32_t x, y, z, w, h, d; } nvn_region_t;
-typedef struct { int32_t x, y, w, h; } nvn_rect_t;
-
-#define OBJ_STORAGE 0x400 /* NVN 1: pool builder 0x40, pool 0x100, command buffer 0xA0, sync 0x40 */
-typedef struct { _Alignas(16) uint8_t b[OBJ_STORAGE]; } nvn_obj_t;
+/* --- NVN types: nvnapi.h ---------------------------------------------------------------------- */
 
 enum {
   /* memory pool flags */
@@ -69,7 +65,6 @@ enum {
 #define CLEAR_ALL_CHANNELS 0xF /* nvnCommandBufferClearColor's mask: R, G, B and A */
 #define SCISSOR_ALL 65535      /* a scissor size that covers any texture */
 
-typedef void *(*getproc_t)(nvn_device_t *dev, const char *name);
 extern void *nvnBootstrapLoader(const char *name); /* from sdk */
 void *aligned_alloc(size_t align, size_t size);     /* from main */
 void free(void *p);                                  /* from main */
@@ -130,6 +125,10 @@ static void (*real_set_textures)(void *builder, int n, nvn_texture_t *const *tex
 static bool (*real_device_init)(nvn_device_t *, const void *builder);
 
 static nvn_device_t *device;
+/* the game's texture and sampler pools, as it last set them: put back after our GPU drawing */
+static void (*real_set_texture_pool)(void *cmd, const void *pool);
+static void (*real_set_sampler_pool)(void *cmd, const void *pool);
+static const void *volatile game_texture_pool, *volatile game_sampler_pool;
 #define MAX_TEXTURES 8
 static nvn_texture_t *swapchain_textures[MAX_TEXTURES];
 static int swapchain_texture_count;
@@ -148,6 +147,7 @@ static void draw_overlay(nvn_queue_t *queue, nvn_window_t *window, int index);
 static void hook_present(nvn_queue_t *queue, nvn_window_t *window, int index)
 {
   gfx_presents++;
+  scenedepth_present(real_getproc, device, queue);
   draw_overlay(queue, window, index);
   gfx_release();
   airwall_release();
@@ -172,6 +172,18 @@ static bool hook_device_init(nvn_device_t *dev, const void *builder)
   return ok;
 }
 
+static void hook_set_texture_pool(void *cmd, const void *pool)
+{
+  game_texture_pool = pool;
+  real_set_texture_pool(cmd, pool);
+}
+
+static void hook_set_sampler_pool(void *cmd, const void *pool)
+{
+  game_sampler_pool = pool;
+  real_set_sampler_pool(cmd, pool);
+}
+
 static void *hook_getproc(nvn_device_t *dev, const char *name);
 
 /* Swap in our version of a function the game looks up. */
@@ -179,6 +191,9 @@ static void *wrap_proc(const char *name, void *proc)
 {
   if (!proc)
     return proc;
+  void *ours = scenedepth_wrap(name, proc);
+  if (ours)
+    return ours;
   if (names_equal(name, "nvnDeviceGetProcAddress")) {
     real_getproc = (getproc_t)proc;
     return (void *)hook_getproc;
@@ -194,6 +209,14 @@ static void *wrap_proc(const char *name, void *proc)
   if (names_equal(name, "nvnDeviceInitialize")) {
     real_device_init = proc;
     return (void *)hook_device_init;
+  }
+  if (names_equal(name, "nvnCommandBufferSetTexturePool")) {
+    real_set_texture_pool = proc;
+    return (void *)hook_set_texture_pool;
+  }
+  if (names_equal(name, "nvnCommandBufferSetSamplerPool")) {
+    real_set_sampler_pool = proc;
+    return (void *)hook_set_sampler_pool;
   }
   return proc;
 }
@@ -249,6 +272,8 @@ void *nvn_bootstrap_hook(const char *name)
 #define MENU_Y_PERMILLE 345
 
 static enum { OV_NONE, OV_READY, OV_FAILED } overlay_state;
+/* drawing with the game's UI shader (gpuui.c): set up once the shader and the fonts are loaded */
+static enum { GPU_NONE, GPU_READY, GPU_FAILED } gpu_state;
 static nvn_obj_t cmd_buffer, pixel_pool, command_pool, slot_sync[SLOTS];
 static uint8_t *pixel_mem, *command_mem, *control_mem;
 /* Opaque: the menu panel changes only on input, so it has one buffer, rewritten after waiting
@@ -275,6 +300,7 @@ static bool slot_used[SLOTS];
 /* what each opaque buffer holds, so it's only redrawn when that changes */
 static uint32_t drawn_hash[GFX_PANELS][SLOTS];
 static int drawn_w[GFX_PANELS][SLOTS], drawn_h[GFX_PANELS][SLOTS];
+static bool drawn_native[GFX_PANELS][SLOTS]; /* drawn by nativeui.c (the game's type) */
 static unsigned frame_count;
 static int swapchain_format, bytes_per_pixel;
 static int alloc_scale; /* the scale the buffers were sized for (whole screen pixels per font pixel) */
@@ -696,16 +722,15 @@ static inline bool is_sprite(unsigned char c)
 #define PAD_GRIP_RIGHT_X 124
 #define PAD_GRIP_Y 70
 #define PAD_GRIP_RADIUS 18
-static const struct { int cx, cy; } pad_sticks[2] = { { 36, 36 }, { 96, 56 } };
-#define PAD_STICK_R 10
-#define PAD_STICK_TRAVEL (PAD_STICK_R - 3) /* how far the dot moves at full tilt */
+static const struct { int cx, cy; } pad_sticks[2] = { { GFX_PAD_LSTICK_X, GFX_PAD_LSTICK_Y },
+                                                      { GFX_PAD_RSTICK_X, GFX_PAD_RSTICK_Y } };
+#define PAD_STICK_R GFX_PAD_STICK_R
+#define PAD_STICK_TRAVEL GFX_PAD_STICK_TRAVEL
 #define PAD_STICK_DOT_R2 5                 /* the dot's radius, squared */
-#define DPAD_X 64
-#define DPAD_Y 56
+#define DPAD_X GFX_PAD_DPAD_X
+#define DPAD_Y GFX_PAD_DPAD_Y
 #define DPAD_ARM 9  /* from the centre to an arm's end */
 #define DPAD_HALF 3 /* half an arm's width */
-/* gfx_panel_t.clicks bits */
-enum { CLICK_L3, CLICK_R3, CLICK_DPAD_UP, CLICK_DPAD_DOWN, CLICK_DPAD_LEFT, CLICK_DPAD_RIGHT };
 
 static bool pad_inside(int x, int y)
 {
@@ -755,17 +780,17 @@ static uint8_t pad_pixel(const gfx_panel_t *panel, int x, int y)
       return PAL_TEXT + GFX_NORMAL; /* where the stick is */
     if (dist2 >= (PAD_STICK_R - 1) * (PAD_STICK_R - 1))
       return PAL_TEXT + GFX_DIM; /* its ring */
-    return panel->clicks >> (CLICK_L3 + k) & 1 ? PAL_TEXT + GFX_FAINT : 0; /* clicked in */
+    return panel->clicks >> (GFX_CLICK_L3 + k) & 1 ? PAL_TEXT + GFX_FAINT : 0; /* clicked in */
   }
   int dx = x - DPAD_X;
   int dy = y - DPAD_Y;
   if (dpad_inside(dx, dy)) {
     if (!dpad_inside(dx - 1, dy) || !dpad_inside(dx + 1, dy) || !dpad_inside(dx, dy - 1) || !dpad_inside(dx, dy + 1))
       return PAL_TEXT + GFX_DIM; /* its edge */
-    int arm = dy < -DPAD_HALF  ? CLICK_DPAD_UP
-              : dy > DPAD_HALF ? CLICK_DPAD_DOWN
-              : dx < -DPAD_HALF ? CLICK_DPAD_LEFT
-              : dx > DPAD_HALF ? CLICK_DPAD_RIGHT
+    int arm = dy < -DPAD_HALF  ? GFX_CLICK_DPAD_UP
+              : dy > DPAD_HALF ? GFX_CLICK_DPAD_DOWN
+              : dx < -DPAD_HALF ? GFX_CLICK_DPAD_LEFT
+              : dx > DPAD_HALF ? GFX_CLICK_DPAD_RIGHT
                                : -1; /* the centre */
     return arm >= 0 && (panel->clicks >> arm & 1) ? PAL_TEXT + GFX_NORMAL : 0;
   }
@@ -862,6 +887,27 @@ static void build_palette(uint8_t pal[PAL_COUNT][3])
   };
   memcpy(pal[PAL_FOLDER], folder, sizeof(folder));
   memset(pal[PAL_SHADOW], 0, 3);
+}
+
+/* nativeui.c's fallback for the icons it has no native form for yet: gz's pixel art in gz's colours.
+ * (x, y): the font pixel in the icon's cell(s), 8 x 10 each. */
+static bool native_legacy_pixel(unsigned char c, int x, int y, int style, uint8_t rgb[3])
+{
+  static uint8_t pal[PAL_COUNT][3];
+  static bool pal_ready;
+  if (!pal_ready) {
+    build_palette(pal);
+    pal_ready = true;
+  }
+  uint8_t k = 0;
+  if (is_sprite(c))
+    k = sprite_pixel(c, x, y + 1, style); /* a sprite's tile rows start one above the cell */
+  else if (x < FONT_W && y < FONT_H && font_pixel(c, x, y))
+    k = PAL_TEXT + style;
+  if (!k)
+    return false;
+  memcpy(rgb, pal[k], 3);
+  return true;
 }
 
 /* Opaque: write the panel straight into a buffer in the picture's format. Rows are built in a
@@ -1327,6 +1373,31 @@ static int menu_scale_for(nvn_rect_t area)
 
 /* The top-left of a w x h panel, in the visible area: the menu under the D-pad, the others in their
  * corner (a GFX_CUSTOM panel where it was put, kept whole on screen). */
+/* a panel's grid (cols x rows), its scale and its size on screen (w x h, the GPU's when gpu); false if it's
+ * empty */
+static bool panel_size(int p, const gfx_panel_t *panel, const frame_t *frame, bool gpu, int *cols_out, int *rows_out,
+                       int *scale_out, int *w_out, int *h_out)
+{
+  if (!panel->rows)
+    return false;
+  int cols = panel->cols > MIN_PANEL_COLS ? panel->cols : MIN_PANEL_COLS;
+  int rows = panel->rows;
+  if (cols > panel_max_cols[p])
+    cols = panel_max_cols[p];
+  if (rows > panel_max_rows[p])
+    rows = panel_max_rows[p];
+  /* a panel can be drawn smaller than the menu (the input display's size), not below 1x */
+  int scale = panel->scale_pct ? frame->scale * panel->scale_pct / 100 : frame->scale;
+  if (scale < SC_ONE)
+    scale = SC_ONE;
+  int w = PANEL_W(cols, scale);
+  int h = PANEL_H(rows, scale);
+  if (gpu)
+    nativeui_gpu_size(panel, rows, scale, &w, &h);
+  *cols_out = cols, *rows_out = rows, *scale_out = scale, *w_out = w, *h_out = h;
+  return true;
+}
+
 static void place_panel(int p, const gfx_panel_t *panel, const frame_t *frame, int w, int h, int *x_out, int *y_out)
 {
   nvn_rect_t area = frame->area;
@@ -1456,13 +1527,17 @@ static bool plan_see_through_panel(panel_draw_t *draw, int p, const gfx_panel_t 
 static bool plan_opaque_panel(panel_draw_t *draw, int p, const gfx_panel_t *panel, int slot, int w, int h, int scale)
 {
   int b = buffers_per_panel[p] > 1 ? slot : 0;
-  if (drawn_hash[p][b] != panel->hash || drawn_w[p][b] != w || drawn_h[p][b] != h) {
+  bool native = gfx_style == GFX_STYLE_GAME && nativeui_ready() && !panel->pad;
+  if (drawn_hash[p][b] != panel->hash || drawn_w[p][b] != w || drawn_h[p][b] != h || drawn_native[p][b] != native) {
     if (buffers_per_panel[p] == 1 && !wait_gpu_idle()) /* the GPU may still be copying the old one */
       return false;
-    rasterise(panel, panel_buffer_ptr(p, b), scale, w, h);
+    if (!native || !nativeui_rasterise(panel, panel_buffer_ptr(p, b), scale, w, h, swapchain_format, bytes_per_pixel,
+                                       native_legacy_pixel))
+      rasterise(panel, panel_buffer_ptr(p, b), scale, w, h);
     drawn_hash[p][b] = panel->hash;
     drawn_w[p][b] = w;
     drawn_h[p][b] = h;
+    drawn_native[p][b] = native; /* what was wanted: a refused panel isn't tried again until it changes */
   }
   draw->source = panel_buffer_addr(p, b);
   return true;
@@ -1484,11 +1559,17 @@ static void record_readback(nvn_texture_t *tex, const panel_draw_t *draw)
 static void draw_overlay(nvn_queue_t *queue, nvn_window_t *window, int index)
 {
   const gfx_screen_t *screen = gfx_published();
-  int n_dots, n_hp;
+  airwall_take(); /* the overlays' newest frame: lines and bars for the GPU, or rectangles */
+  enemyhp_take();
+  int n_dots, n_hp, n_lines, n_bars;
   const aw_dot_t *dots = airwall_published(&n_dots);
   const aw_dot_t *hp = enemyhp_published(&n_hp);
+  airwall_lines(&n_lines);
+  const eh_bar_t *bars = enemyhp_bars(&n_bars);
+  /* the enemies the next frame's depth copy looks at (none: it looks at none) */
+  scenedepth_ask_bars(bars, gpu_state == GPU_READY && gfx_style == GFX_STYLE_GAME && !enemy_hp_xray ? n_bars : 0);
   int pause_icon = gfx_pause_icon;
-  if ((!screen && !n_dots && !n_hp && !pause_icon) || overlay_state == OV_FAILED)
+  if ((!screen && !n_dots && !n_hp && !n_lines && !n_bars && !pause_icon) || overlay_state == OV_FAILED)
     return;
   if (index < 0 || index >= swapchain_texture_count) {
     static bool warned;
@@ -1514,13 +1595,22 @@ static void draw_overlay(nvn_queue_t *queue, nvn_window_t *window, int index)
   frame.scale = menu_scale_for(frame.area);
   frame.margin = MARGIN_FONT_PX * frame.scale / SC_ONE;
   frame.menu_y = frame.area.h * MENU_Y_PERMILLE / 1000;
-  /* tell the menu how many rows fit under the D-pad */
+  /* the game's style on the GPU, once its shader and fonts are loaded (game thread, first_frame) */
+  if (gpu_state == GPU_NONE && gfx_style == GFX_STYLE_GAME && uishader_program(0) && gamefont_ready()) {
+    gpu_state = gpuui_init(real_getproc, device) ? GPU_READY : GPU_FAILED;
+    overlayui_failed = gpu_state == GPU_FAILED; /* the game thread makes the overlays' rectangles instead */
+  }
+  bool gpu = gpu_state == GPU_READY && gfx_style == GFX_STYLE_GAME;
+  /* tell the menu how many rows fit under the D-pad (the GPU lays it out with taller rows) */
   int menu_space = frame.area.h - frame.menu_y - frame.margin;
-  int fit = (menu_space * SC_ONE / frame.scale - FONT_H) / CELL_H;
+  int fit = gpu ? nativeui_menu_rows(menu_space, frame.scale) : (menu_space * SC_ONE / frame.scale - FONT_H) / CELL_H;
   gfx_menu_rows = fit < MIN_MENU_ROWS ? MIN_MENU_ROWS : fit > GFX_ROWS ? GFX_ROWS : fit;
 
   frame.opacity = gfx_opacity;
   frame.see_through = frame.opacity < 100 && is_rgba8(swapchain_format) && see_through_state != ST_FAILED;
+  /* the game's style reads nothing back: on the GPU its band is blended there, else it's drawn opaque */
+  if (gfx_style == GFX_STYLE_GAME && nativeui_ready())
+    frame.see_through = false;
   if (frame.see_through && see_through_state == ST_NONE && !see_through_init(menu_space))
     frame.see_through = false;
   /* panels with no background are drawn as rectangles (draw_clear_rects): no read-back for them */
@@ -1532,26 +1622,54 @@ static void draw_overlay(nvn_queue_t *queue, nvn_window_t *window, int index)
     overlay_fail("GPU didn't finish the previous copy");
     return;
   }
+  int gpu_panels = 0;
+  /* the glyph atlas starts afresh when it's full: its staging rows are rewritten, so the copies of both
+   * slots must be done first (rare: a new text size or language) */
+  if (gpu && gpuui_atlas_resetting() && !wait_gpu_idle())
+    return;
+  bool prime_depth = false;
+  if (gpu) {
+    gpuui_begin(tex, frame.area, th, origin_lower_left, frame.slot);
+    /* the scene's depth, made Link's alone, for hiding the air walls' lines behind him */
+    const nvn_texture_t *depth = 0;
+    int depth_w = 0, depth_h = 0;
+    gpu_occluder_t link = { 0 }; /* only Link hides them */
+    float box[4];
+    if (n_lines && !airwalls_xray && airwall_link_box(box, link.front, link.back, link.ground)) {
+      link.x0 = box[0], link.y0 = box[1], link.x1 = box[2], link.y1 = box[3];
+      depth = scenedepth_lines(frame.area.w, frame.area.h, &depth_w, &depth_h, &prime_depth);
+    }
+    if (!gpuui_depth(depth, depth_w, depth_h, prime_depth, &link))
+      scenedepth_lines_give_up();
+  }
+  /* the air walls and the enemies' health: on the GPU in the game's style (under the panels), else as
+   * cleared rectangles below */
+  int overlays = gpu ? overlayui_draw(frame.area.w, frame.area.h, pause_icon) : 0;
+  if (overlays)
+    gpu_panels++;
+
+  /* the input display over the watches in the bottom left, both on their bands (the game's style): one
+   * width for both, the wider's, so the two bands are one */
+  int stacked_w = 0;
+  if (gpu && screen) {
+    const gfx_panel_t *hud = &screen->panel[PANEL_HUD], *input = &screen->panel[GFX_PANEL_INPUT];
+    int c, r, s, hud_w, hud_h, input_w, input_h;
+    if (hud->corner == GFX_BOTTOM_LEFT && input->corner == GFX_BOTTOM_LEFT && !hud->clear && !input->clear &&
+        panel_size(PANEL_HUD, hud, &frame, gpu, &c, &r, &s, &hud_w, &hud_h) &&
+        panel_size(GFX_PANEL_INPUT, input, &frame, gpu, &c, &r, &s, &input_w, &input_h))
+      stacked_w = hud_w > input_w ? hud_w : input_w;
+  }
 
   panel_draw_t draws[GFX_PANELS];
   int n = 0;
   for (int i = 0; i < GFX_PANELS && screen; i++) {
     int p = (i + 1) % GFX_PANELS; /* the menu (0) last: it's drawn over everything else */
     const gfx_panel_t *panel = &screen->panel[p];
-    if (!panel->rows)
+    int cols, rows, scale, w, h;
+    if (!panel_size(p, panel, &frame, gpu, &cols, &rows, &scale, &w, &h))
       continue;
-    int cols = panel->cols > MIN_PANEL_COLS ? panel->cols : MIN_PANEL_COLS;
-    int rows = panel->rows;
-    if (cols > panel_max_cols[p])
-      cols = panel_max_cols[p];
-    if (rows > panel_max_rows[p])
-      rows = panel_max_rows[p];
-    /* a panel can be drawn smaller than the menu (the input display's size), not below 1x */
-    int scale = panel->scale_pct ? frame.scale * panel->scale_pct / 100 : frame.scale;
-    if (scale < SC_ONE)
-      scale = SC_ONE;
-    int w = PANEL_W(cols, scale);
-    int h = PANEL_H(rows, scale);
+    if (stacked_w && (p == PANEL_HUD || p == GFX_PANEL_INPUT))
+      w = stacked_w;
     int x, y;
     place_panel(p, panel, &frame, w, h, &x, &y);
     if (p == PANEL_HUD && panel->corner == GFX_BOTTOM_RIGHT)
@@ -1570,7 +1688,12 @@ static void draw_overlay(nvn_queue_t *queue, nvn_window_t *window, int index)
       h = frame.area.h - y - frame.margin;
     if (w <= 0 || h <= 0)
       continue;
-    if (p != PANEL_MENU && (size_t)w * h * bytes_per_pixel > pixel_buffer_size[p]) /* never: sized for the most */
+    if (gpu) { /* drawn on the GPU at its own size: nothing goes through the panels' buffers */
+      if (nativeui_gpu_panel(panel, x, y, w, h, scale, frame.opacity, native_legacy_pixel))
+        gpu_panels++;
+      continue;
+    }
+    if (p != PANEL_MENU && (size_t)w * h * bytes_per_pixel > pixel_buffer_size[p]) /* sized for the most gz draws */
       continue;
     panel_draw_t *draw = &draws[n];
     draw->region = (nvn_region_t){ frame.area.x + x, frame.area.y + y, 0, w, h, 1 };
@@ -1592,18 +1715,18 @@ static void draw_overlay(nvn_queue_t *queue, nvn_window_t *window, int index)
     draw->scale = scale;
     n++;
   }
-  if (!n && !n_dots && !n_hp && !pause_icon)
+  if (!n && !n_dots && !n_hp && !pause_icon && !gpu_panels)
     return;
   __asm__ volatile("dsb sy" ::: "memory"); /* pixels reach memory before the GPU copies them */
 
   fn.cmd_add_command(&cmd_buffer, &command_pool, frame.slot * CMD_SIZE, CMD_SIZE);
   fn.cmd_add_control(&cmd_buffer, control_mem + frame.slot * CTRL_SIZE, CTRL_SIZE);
   fn.cmd_begin(&cmd_buffer);
-  if (n_dots)
+  if (n_dots && !(overlays & OVERLAY_LINES))
     draw_rects(dots, n_dots, airwall_colours, AW_NCOLORS, tex, frame.area, th, frame.scale);
-  if (n_hp)
+  if (n_hp && !(overlays & OVERLAY_BARS))
     draw_rects(hp, n_hp, enemyhp_colours, EH_NCOLORS, tex, frame.area, th, frame.scale);
-  if (pause_icon)
+  if (pause_icon && !(overlays & OVERLAY_PAUSE))
     draw_pause_icon(pause_icon, tex, frame.area, th, frame.scale);
   for (int i = 0; i < n; i++) {
     const panel_draw_t *draw = &draws[i];
@@ -1616,6 +1739,8 @@ static void draw_overlay(nvn_queue_t *queue, nvn_window_t *window, int index)
       fn.cmd_copy_to_texture(&cmd_buffer, draw->source, tex, 0, &draw->region, 0);
     }
   }
+  if (gpu_panels && gpuui_end(&cmd_buffer, game_texture_pool, game_sampler_pool) && prime_depth)
+    scenedepth_primed();
   nvn_handle_t handle = fn.cmd_end(&cmd_buffer);
   fn.queue_submit(queue, 1, &handle);
   fn.queue_fence(queue, &slot_sync[frame.slot], SYNC_ALL_GPU_COMMANDS_COMPLETE, 0);
