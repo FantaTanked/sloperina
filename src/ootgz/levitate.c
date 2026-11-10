@@ -884,8 +884,6 @@ static void protect_landing(bool menu_open)
       }
     }
   }
-
-  /* L3: start / stop */
 }
 
 /* L3: start / stop */

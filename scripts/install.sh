@@ -106,6 +106,7 @@ if [ -z "$TARGET" ]; then
   i=$((i + 1)); echo "  $i. Another emulator folder (yuzu-style: has load and sdmc)"; CHOICES="${CHOICES}folder|
 "
   printf "Number: "; read -r n
+  case $n in ''|*[!0-9]*) n=0 ;; esac
   line=$(printf '%s' "$CHOICES" | sed -n "${n}p")
   [ -n "$line" ] || { echo "Nothing chosen."; exit 1; }
   TARGET=${line%%|*}; TPATH=${line#*|}

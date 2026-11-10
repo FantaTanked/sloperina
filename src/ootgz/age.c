@@ -135,6 +135,12 @@ static void take_off_adult_only(uint32_t slot)
     gd_set_str(slot, "");
 }
 
+/* The age the save data had before a reload changed it, with the adult-only clothes that took off;
+ * -1 once the reload has happened. The data is changed before the map loads, so a reload that never
+ * happens has to put it back. */
+static int undo_age = -1;
+static char undo_tunic[GD_STR_LEN], undo_boots[GD_STR_LEN];
+
 static void apply_age(int age)
 {
   log_printf("age: %s (sword %s, shield %s)", age == AGE_CHILD ? "child" : "adult",
@@ -190,8 +196,29 @@ void age_reload_map(void)
     gfx_notice("can't reload: no start point known for this map");
     return;
   }
-  if (age != current_age)
+  if (age != current_age) {
+    if (undo_age < 0) {
+      undo_age = current_age;
+      snprintf(undo_tunic, sizeof(undo_tunic), "%s", gd_get_str(GD_STR_TUNIC) ? gd_get_str(GD_STR_TUNIC) : "");
+      snprintf(undo_boots, sizeof(undo_boots), "%s", gd_get_str(GD_STR_BOOTS) ? gd_get_str(GD_STR_BOOTS) : "");
+    } else if (age == undo_age) {
+      undo_age = -1; /* a second reload, back to the age the map is loaded at */
+    }
     apply_age(age);
+  }
   wanted_age = -1; /* from now on, follow the game's again */
   warp_arm(map, spawn);
+}
+
+void age_frame(void)
+{
+  if (undo_age < 0 || warp_pending())
+    return;
+  if (warp_abandoned() && age_current() >= 0 && age_current() != undo_age) {
+    apply_age(undo_age);
+    gd_set_str(GD_STR_TUNIC, undo_tunic);
+    gd_set_str(GD_STR_BOOTS, undo_boots);
+    gfx_notice("age change undone: the map didn't reload");
+  }
+  undo_age = -1;
 }

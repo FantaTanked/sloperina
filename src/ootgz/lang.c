@@ -86,7 +86,10 @@ static char fold(unsigned code_point)
 
 static unsigned hex_digit(char c)
 {
-  return (unsigned)(c >= 'a' ? c - 'a' + 10 : c >= 'A' ? c - 'A' + 10 : c - '0');
+  if (c >= '0' && c <= '9')
+    return (unsigned)(c - '0');
+  c |= 0x20;
+  return c >= 'a' && c <= 'f' ? (unsigned)(c - 'a' + 10) : 0;
 }
 
 /* p just after an opening quote: decodes the string where it is (it only gets shorter), returns the
@@ -201,8 +204,11 @@ static void conversions(const char *format, char *out, int len)
     format++;
     /* skip flags, width, precision and length modifiers to the conversion letter */
     while (*format && !((*format >= 'a' && *format <= 'z' && *format != 'l' && *format != 'h' && *format != 'z') ||
-                        *format == '%' || *format == 'X'))
+                        *format == '%' || *format == 'X')) {
+      if (*format == '*' && n < len - 2) /* takes an argument too */
+        out[n++] = '*';
       format++;
+    }
     if (!*format)
       break;
     if (*format != '%')

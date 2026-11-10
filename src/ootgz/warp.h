@@ -12,5 +12,7 @@ void warp_arm(const warp_map_t *map, const spawn_t *spawn);
 void warp_cancel(void);
 void warp_frame(void);              /* frame hook */
 const char *warp_state(void);       /* for the warps menu */
+bool warp_pending(void);            /* requested or armed, not yet happened */
+bool warp_abandoned(void);          /* cancelled or timed out before Link left the map */
 
 #endif

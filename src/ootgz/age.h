@@ -11,6 +11,7 @@ enum { AGE_CHILD, AGE_ADULT };
 int age_current(void);   /* the game's, or -1 if unknown */
 int age_wanted(void);    /* what the next reload gives (the game's until the switch is changed) */
 void age_want(int age);
+void age_frame(void);      /* frame hook, after warp_frame */
 void age_reload_map(void); /* reload the map at the start point Link last arrived at, at age_wanted */
 
 #endif

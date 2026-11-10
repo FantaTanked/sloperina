@@ -96,14 +96,14 @@ static gd_type_t *find_type_entry(gd_kind_t kind)
     [GD_ENUM] = z64hd_game->vt_enum_type,
   };
   uintptr_t vtable = MAIN(vtable_offsets[kind]);
+  if (!sys_mapped((uintptr_t)mgr, Z64HD_GD_TYPES_SCAN + sizeof(gd_type_t), SYS_PERM_R))
+    return 0;
   if (type_entry_off[kind]) {
     gd_type_t *type = (gd_type_t *)(mgr + type_entry_off[kind]);
     if (type->vtable == vtable && type_plausible(type))
       return type;
     type_entry_off[kind] = 0;
   }
-  if (!sys_mapped((uintptr_t)mgr, Z64HD_GD_TYPES_SCAN + sizeof(gd_type_t), SYS_PERM_R))
-    return 0;
   for (uint32_t offset = 0; offset < Z64HD_GD_TYPES_SCAN; offset += 8) {
     gd_type_t *type = (gd_type_t *)(mgr + offset);
     if (type->vtable == vtable && type_plausible(type)) {

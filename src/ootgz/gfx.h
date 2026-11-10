@@ -103,6 +103,9 @@ void gfx_frame(void);            /* publish; once per frame after everything has
 
 /* render thread: the latest published screen, or NULL when there's nothing to show */
 const gfx_screen_t *gfx_published(void);
+void gfx_release(void); /* render thread: done with it */
+/* render thread: a notice (a string literal) for the game thread to show on its next frame */
+void gfx_notice_later(const char *s);
 
 /* set by nvn.c once a frame has been drawn on screen */
 extern volatile bool gfx_on_screen;

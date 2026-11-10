@@ -2642,7 +2642,7 @@ static void build_log(void)
 
 static menu_t m_about;
 
-#define SPLASH_FRAMES 240 /* about 8 seconds, as gz's */
+#define SPLASH_FRAMES (8 * GAME_FPS) /* as gz's */
 
 /* gz's start-up splash (bottom right): name and version, the build date under it, the website, how to
  * open the menu */

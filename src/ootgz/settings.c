@@ -31,9 +31,9 @@
 #define DIR SD_DIR
 #define SETTINGS_FILE DIR "/settings.ini"
 #define LOG_FILE DIR "/log.txt" /* everything the module logs, from this start of the game */
-#define LOG_FILE_GAP 30         /* frames between writes (about a second) */
+#define LOG_FILE_GAP GAME_FPS   /* frames between writes */
 #define OLD_SETTINGS_FILE SD_OLD_DIR "/settings.ini"
-#define SAVE_GAP_FRAMES 60 /* at most one write every ~2 s */
+#define SAVE_GAP_FRAMES (2 * GAME_FPS) /* between settings writes */
 #define SETTINGS_TEXT_MAX 2048 /* the settings file's size limit, both ways */
 #define LOG_CHUNK 8192         /* the most log text written at once */
 
@@ -213,8 +213,9 @@ static int64_t parse_int(const char *p)
   bool negative = *p == '-';
   if (negative)
     p++;
-  while (*p >= '0' && *p <= '9')
-    value = value * 10 + (*p++ - '0');
+  for (; *p >= '0' && *p <= '9'; p++)
+    if (value < INT64_MAX / 100) /* a longer number stops growing */
+      value = value * 10 + (*p - '0');
   return negative ? -value : value;
 }
 
@@ -366,6 +367,8 @@ static size_t read_settings_text(char *buf, size_t buf_size, const char **from, 
   if (*from) {
     int64_t size = 0;
     fs_size(&size, file);
+    if (size < 0)
+      size = 0;
     if (size > (int64_t)buf_size - 1)
       size = buf_size - 1;
     fs_read(&got, file, 0, buf, (size_t)size);

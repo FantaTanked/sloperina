@@ -37,6 +37,9 @@ uint64_t sys_tick_freq(void);
 
 /* True if [addr, addr + size) is mapped with at least `perm`. Caches the last region. */
 bool sys_mapped(uintptr_t addr, size_t size, uint32_t perm);
+/* The frame hook and frame_counter() run once per presented frame. */
+#define GAME_FPS 60
+
 /* Forget the cached region; called once a frame. */
 void sys_frame(void);
 

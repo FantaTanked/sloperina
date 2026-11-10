@@ -26,5 +26,6 @@ enum { EH_BACK, EH_FILL, EH_LOW, EH_TEXT, EH_NCOLORS };
 
 void enemyhp_frame(void);                     /* game thread, once per frame */
 const aw_dot_t *enemyhp_published(int *n);    /* render thread */
+void enemyhp_release(void);                   /* render thread: done with them */
 
 #endif

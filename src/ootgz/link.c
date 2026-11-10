@@ -128,6 +128,34 @@ uintptr_t mem_find_u64(uint64_t value, bool (*ok)(uintptr_t, void *), void *ctx)
   return find.found;
 }
 
+uintptr_t mem_find_u64_step(mem_scan_t *scan, uint64_t value, bool (*ok)(uintptr_t, void *), void *ctx,
+                            size_t budget)
+{
+  const uint32_t rw = SYS_PERM_R | SYS_PERM_W;
+  for (int guard = 0; guard < 4096 && budget >= 8; guard++) {
+    /* asked again every call: the game maps and unmaps memory between frames */
+    sys_meminfo_t info;
+    if (sys_query_memory(&info, scan->pos) != 0 || info.size == 0 || info.addr + info.size <= scan->pos) {
+      scan->done = true;
+      return 0;
+    }
+    uintptr_t end = (uintptr_t)(info.addr + info.size);
+    if ((info.type & MEMORY_TYPE_MASK) != MEMORY_TYPE_NORMAL || (info.perm & rw) != rw || (info.attr & 1)) {
+      scan->pos = end;
+      continue;
+    }
+    uintptr_t stop = end - scan->pos > budget ? scan->pos + budget : end;
+    for (uintptr_t p = scan->pos; p + 8 <= stop; p += 8)
+      if (*(const volatile uint64_t *)p == value && ok(p, ctx)) {
+        scan->pos = p + 8;
+        return p;
+      }
+    budget -= stop - scan->pos;
+    scan->pos = stop;
+  }
+  return 0;
+}
+
 /* --- equipment ---------------------------------------------------------------------------- */
 
 static uintptr_t cached_equip_component, cached_equip_owner;

@@ -3,11 +3,12 @@
 #include <stdarg.h>
 
 #include "lang.h"
+#include "publish.h"
 #include "sys.h"
 
-/* gz: 20 frames solid, then 20 fading (at the N64's 20 fps); here in our frames (30 fps) */
-#define LOG_SOLID_FRAMES 30
-#define LOG_FADE_FRAMES 30
+/* gz: 20 frames solid, then 20 fading (at the N64's 20 fps) */
+#define LOG_SOLID_FRAMES GAME_FPS
+#define LOG_FADE_FRAMES GAME_FPS
 #define LOG_COLS 48
 #define SPLASH_FADE_FRAMES 30
 #define OPAQUE 255 /* a row's text opacity, fully shown */
@@ -28,9 +29,9 @@ typedef struct {
 static log_line_t log_lines[GFX_LOG_MAX]; /* [0] the newest */
 volatile uint32_t gfx_log_count;
 
-/* Published screens, double-buffered: the game thread fills one while the render thread reads the other. */
-static gfx_screen_t published_screens[2];
-static volatile int published_index = -1; /* the current one; -1: nothing shown */
+static gfx_screen_t published_screens[PUBLISH_BUFFERS];
+static publish_t published = PUBLISH_INIT;
+static const char *volatile later_notice;
 
 volatile bool gfx_on_screen;
 volatile int gfx_menu_rows = GFX_ROWS;
@@ -77,6 +78,11 @@ void gfx_notice(const char *s)
   log_lines[0].age = 0;
   gfx_log_count++;
   log_printf("notice: %s", s);
+}
+
+void gfx_notice_later(const char *s)
+{
+  __atomic_store_n(&later_notice, s, __ATOMIC_RELEASE);
 }
 
 void gfx_logf(const char *fmt, ...)
@@ -349,7 +355,10 @@ static void measure_panel(gfx_panel_t *panel)
 
 void gfx_frame(void)
 {
-  int next = published_index == 0 ? 1 : 0;
+  const char *notice = __atomic_exchange_n(&later_notice, 0, __ATOMIC_ACQ_REL);
+  if (notice)
+    gfx_notice(notice);
+  int next = publish_next(&published);
   gfx_screen_t *screen = &published_screens[next];
 
   gfx_panel_t *menu = &screen->panel[PANEL_MENU];
@@ -373,13 +382,15 @@ void gfx_frame(void)
 
   bool anything = screen->panel[PANEL_MENU].rows || screen->panel[PANEL_HUD].rows ||
                   screen->panel[GFX_PANEL_LOG].rows || screen->panel[GFX_PANEL_INPUT].rows;
-  __atomic_store_n(&published_index, anything ? next : -1, __ATOMIC_RELEASE);
+  publish_set(&published, anything ? next : -1);
   if (!gfx_on_screen)
     log_menu(menu_open ? menu : 0);
 }
 
 const gfx_screen_t *gfx_published(void)
 {
-  int index = __atomic_load_n(&published_index, __ATOMIC_ACQUIRE);
+  int index = publish_take(&published);
   return index < 0 ? 0 : &published_screens[index];
 }
+
+void gfx_release(void) { publish_release(&published); }
