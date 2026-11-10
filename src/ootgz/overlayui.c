@@ -2,13 +2,15 @@
  * its gpuui frame, under the panels). gz's style, or the game's if its GPU path can't start, keeps the
  * cleared rectangles (airwall.c, enemyhp.c).
  *
- * The outlines are smooth lines with a soft glow under them, fading a little with distance.
+ * The outlines are smooth lines with a soft glow under them, fading a little with distance, hidden where Link
+ * is in front of them (the scene's depth made his alone, scenedepth.c and gpuui.c; unless airwalls_xray).
  *
  * A health bar is built from the HUD's magic meter (MpGauge*: its shadow, its grainy track, its fill of
  * segments with their green made red, its frame), with the life and the most over it on the number plate
  * of the minigames' counters (NumBaseMiniGame), in the game's type. When the life drops, the part lost
  * stays a moment in a pale gold and then drains away, as the game's own meters empty. Without those
- * pictures (still loading, or not found) the bar is plain, in their colours. */
+ * pictures (still loading, or not found) the bar is plain, in their colours. A bar fades out while its enemy
+ * is hidden behind the scenery (scenedepth.c; unless enemy_hp_xray). */
 #include "overlayui.h"
 
 #include "airwall.h"
@@ -17,6 +19,7 @@
 #include "gameimage.h"
 #include "gfx.h"
 #include "gpuui.h"
+#include "scenedepth.h"
 #include "sys.h"
 #include "uishader.h"
 
@@ -65,7 +68,10 @@ static bool draw_lines(float w, float h, float px)
       far = far < 0 ? 0 : far > 1 ? 1 : far;
       float a = 1 - (1 - FADE_TO) * far;
       c.a = pass ? a : a * GLOW_ALPHA;
-      gpuui_line(l->x0 * w, l->y0 * h, l->x1 * w, l->y1 * h, (pass ? LINE_W : GLOW_W) * px, c);
+      if (airwalls_xray)
+        gpuui_line(l->x0 * w, l->y0 * h, l->x1 * w, l->y1 * h, (pass ? LINE_W : GLOW_W) * px, c);
+      else /* hidden where the scene is nearer (with nvn.c's depth for the frame) */
+        gpuui_line_depth(l->x0 * w, l->y0 * h, l->d0, l->x1 * w, l->y1 * h, l->d1, (pass ? LINE_W : GLOW_W) * px, c);
     }
   }
   return true;
@@ -362,8 +368,15 @@ static bool draw_bars(float w, float h, float px)
     order[j] = i;
   }
   uint64_t now = sys_tick();
-  for (int i = n > MAX_BARS_DRAWN ? n - MAX_BARS_DRAWN : 0; i < n; i++) /* the nearest are last */
-    draw_bar(&bars[order[i]], w, h, px, now, pictures);
+  for (int i = n > MAX_BARS_DRAWN ? n - MAX_BARS_DRAWN : 0; i < n; i++) { /* the nearest are last */
+    const eh_bar_t *b = &bars[order[i]];
+    float alpha = enemy_hp_xray ? 1 : scenedepth_bar_alpha(b->id, now);
+    if (alpha <= 0.004f) /* behind the scenery */
+      continue;
+    gpuui_alpha(alpha);
+    draw_bar(b, w, h, px, now, pictures);
+  }
+  gpuui_alpha(1);
   return true;
 }
 

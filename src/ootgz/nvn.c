@@ -9,6 +9,7 @@
  *   nvnQueuePresentTexture       before the game's present, copy our panels into the texture being
  *                                presented
  *   nvnDeviceInitialize          remember the device
+ *   nvnCommandBufferCopyTextureToTexture  the game's copy of its scene depth: ours after it (scenedepth.c)
  *
  * Drawing uses no shaders (Switch 2 shader binaries can't be built with public tools): the text is
  * rasterised on the CPU into a buffer in our own memory pool, in the swapchain's format, and copied
@@ -30,6 +31,7 @@
 #include "gpuui.h"
 #include "overlayui.h"
 #include "nativeui.h"
+#include "scenedepth.h"
 #include "uishader.h"
 #include "sys.h"
 
@@ -145,6 +147,7 @@ static void draw_overlay(nvn_queue_t *queue, nvn_window_t *window, int index);
 static void hook_present(nvn_queue_t *queue, nvn_window_t *window, int index)
 {
   gfx_presents++;
+  scenedepth_present(real_getproc, device, queue);
   draw_overlay(queue, window, index);
   gfx_release();
   airwall_release();
@@ -188,6 +191,9 @@ static void *wrap_proc(const char *name, void *proc)
 {
   if (!proc)
     return proc;
+  void *ours = scenedepth_wrap(name, proc);
+  if (ours)
+    return ours;
   if (names_equal(name, "nvnDeviceGetProcAddress")) {
     real_getproc = (getproc_t)proc;
     return (void *)hook_getproc;
@@ -1559,7 +1565,9 @@ static void draw_overlay(nvn_queue_t *queue, nvn_window_t *window, int index)
   const aw_dot_t *dots = airwall_published(&n_dots);
   const aw_dot_t *hp = enemyhp_published(&n_hp);
   airwall_lines(&n_lines);
-  enemyhp_bars(&n_bars);
+  const eh_bar_t *bars = enemyhp_bars(&n_bars);
+  /* the enemies the next frame's depth copy looks at (none: it looks at none) */
+  scenedepth_ask_bars(bars, gpu_state == GPU_READY && gfx_style == GFX_STYLE_GAME && !enemy_hp_xray ? n_bars : 0);
   int pause_icon = gfx_pause_icon;
   if ((!screen && !n_dots && !n_hp && !n_lines && !n_bars && !pause_icon) || overlay_state == OV_FAILED)
     return;
@@ -1619,8 +1627,21 @@ static void draw_overlay(nvn_queue_t *queue, nvn_window_t *window, int index)
    * slots must be done first (rare: a new text size or language) */
   if (gpu && gpuui_atlas_resetting() && !wait_gpu_idle())
     return;
-  if (gpu)
+  bool prime_depth = false;
+  if (gpu) {
     gpuui_begin(tex, frame.area, th, origin_lower_left, frame.slot);
+    /* the scene's depth, made Link's alone, for hiding the air walls' lines behind him */
+    const nvn_texture_t *depth = 0;
+    int depth_w = 0, depth_h = 0;
+    gpu_occluder_t link = { 0 }; /* only Link hides them */
+    float box[4];
+    if (n_lines && !airwalls_xray && airwall_link_box(box, link.front, link.back, link.ground)) {
+      link.x0 = box[0], link.y0 = box[1], link.x1 = box[2], link.y1 = box[3];
+      depth = scenedepth_lines(frame.area.w, frame.area.h, &depth_w, &depth_h, &prime_depth);
+    }
+    if (!gpuui_depth(depth, depth_w, depth_h, prime_depth, &link))
+      scenedepth_lines_give_up();
+  }
   /* the air walls and the enemies' health: on the GPU in the game's style (under the panels), else as
    * cleared rectangles below */
   int overlays = gpu ? overlayui_draw(frame.area.w, frame.area.h, pause_icon) : 0;
@@ -1718,8 +1739,8 @@ static void draw_overlay(nvn_queue_t *queue, nvn_window_t *window, int index)
       fn.cmd_copy_to_texture(&cmd_buffer, draw->source, tex, 0, &draw->region, 0);
     }
   }
-  if (gpu_panels)
-    gpuui_end(&cmd_buffer, game_texture_pool, game_sampler_pool);
+  if (gpu_panels && gpuui_end(&cmd_buffer, game_texture_pool, game_sampler_pool) && prime_depth)
+    scenedepth_primed();
   nvn_handle_t handle = fn.cmd_end(&cmd_buffer);
   fn.queue_submit(queue, 1, &handle);
   fn.queue_fence(queue, &slot_sync[frame.slot], SYNC_ALL_GPU_COMMANDS_COMPLETE, 0);

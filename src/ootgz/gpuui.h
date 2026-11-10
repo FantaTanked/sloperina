@@ -29,12 +29,25 @@ void gpuui_begin(nvn_texture_t *target, nvn_rect_t area, int texture_height, boo
 void gpuui_rect(float x, float y, float w, float h, const gpu_colour_t corners[4]);
 /* the quads made from now on (until it's set again, or the frame's end): scaled by s about (ox, oy) */
 void gpuui_scale(float s, float ox, float oy);
+/* ... their colours' alpha times a (0..1) */
+void gpuui_alpha(float a);
+/* this frame's depth (Depth32F, w x h, over the whole visible area) and what of it may hide the lines: what's
+ * in `only`'s box (rect 0..1 of the area; beyond the plane front, short of the plane back, nearer than the
+ * plane ground: each a depth p[0] x + p[1] y + p[2] at (x, y) 0..1 of the area). The lines drawn with
+ * gpuui_line_depth go into a layer that size, hidden where that is nearer than they are, and the layer over
+ * the picture; the depth is changed (the far plane outside the box). clear: clear it to the far plane first
+ * (once, for a new one). 0: none. false: no memory for the layer (the lines show through, from now on) */
+typedef struct { float x0, y0, x1, y1, front[3], back[3], ground[3]; } gpu_occluder_t;
+bool gpuui_depth(const nvn_texture_t *depth, int w, int h, bool clear, const gpu_occluder_t *only);
 void gpuui_fill(float x, float y, float w, float h, gpu_colour_t colour);
 /* a rectangle turned by angle (radians) about its centre */
 void gpuui_rect_turned(float cx, float cy, float w, float h, float angle, gpu_colour_t colour);
 /* a line from (x0, y0) to (x1, y1), `width` across, its sides soft (half its width fading out each side
  * of a solid middle as wide as `width`): smooth at any slope */
 void gpuui_line(float x0, float y0, float x1, float y1, float width, gpu_colour_t colour);
+/* the same, its ends at depths d0 and d1 (0 near .. 1 far, as the game's depth buffer has them): with a
+ * depth for the frame (gpuui_depth) it's hidden where that is nearer, else drawn as gpuui_line */
+void gpuui_line_depth(float x0, float y0, float d0, float x1, float y1, float d1, float width, gpu_colour_t colour);
 /* a glyph with its pen at x and baseline at y; returns its advance in pixels (0 if it has none) */
 float gpuui_glyph(gf_face_t face, int em, uint32_t codepoint, float x, float baseline, gpu_colour_t colour);
 /* a shape of the caller's: a w x h coverage image (0..255 per pixel, rows `stride` apart) painted once by
@@ -77,6 +90,7 @@ void gpuui_image(int i, float x, float y, float w, float h, const float crop[4],
  * frame) */
 void gpuui_image_mapped(int i, float x, float y, float w, float h, const float crop[4], gpu_colour_t black,
                         gpu_colour_t white, float alpha);
-void gpuui_end(nvn_obj_t *cmd, const void *game_texture_pool, const void *game_sampler_pool);
+/* true: the frame's depth was bound (and cleared, if asked) */
+bool gpuui_end(nvn_obj_t *cmd, const void *game_texture_pool, const void *game_sampler_pool);
 
 #endif

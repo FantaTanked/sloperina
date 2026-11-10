@@ -190,6 +190,30 @@ Read with [KillzXGaming/ShaderLibrary](https://github.com/KillzXGaming/ShaderLib
   the rectangles gz's style clears. Each frame's lines and bars go to the render thread in the same three
   buffers as its dots and rectangles (`publish.h`, as the panels' screens): the render thread takes them once a
   frame (`airwall_take`, `enemyhp_take`) and releases them after the present.
+- Hidden behind Link and the scenery (`scenedepth.c`; FINDINGS.md 9.6 has the depth): each gameplay frame the
+  game copies its scene depth (Depth32F at the render resolution) right after its depth pre-pass, and our
+  `nvnCommandBufferCopyTextureToTexture` adds to its command buffer, right after that copy (on the console
+  the game puts HUD targets over the depth's memory before the present):
+  - for the health bars, 1x1 copies of the texels at four points up each enemy (enemyhp.c gives them with the
+    depth the scene must be nearer than: their own, 0.5 m + 4% nearer) into a 6 KiB buffer, read two or more
+    presents later behind a fence (a slot whose texels are still the marker NaN is fenced again: the game
+    sometimes records the next frame's copy before this present). A bar fades out (140 ms) while all of its
+    enemy's points are hidden, and in when one shows; with no results for half a second (menus) bars show.
+  - for the air walls, a copy (scaled) into our own Depth32F at about the scene's resolution (5.3 MiB). At
+    present time gpuui makes it Link's alone, then draws the lines into an R8 layer that size against it,
+    a colour at a time, and lays the layer over the picture in that colour (sampled through a view as
+    1, 1, 1, R: a colour's glow and line give the same as drawn straight on the picture). Link's alone: his
+    box (airwall.c: square to the camera, 0.35 m each way round him, 0.45 adult, from 4 cm over his feet to
+    his height) is a rectangle on the picture and three planes (its front, its back and the ground under
+    him), each as a depth linear on the picture, so a quad's z row gives it. Into the layer: white where the
+    depth is beyond the front (LEQUAL), black where it's past the back (LESS) or at the ground or under it;
+    then, the depth alone bound, a quad at the far plane sampling that mask through a material that gives
+    alpha 1 - mask, so it's discarded on Link and writes the far plane everywhere else (ALWAYS, writing).
+    The lines' ends carry their depth (3 cm + 0.3% nearer, linear on the picture as the scene's is), so
+    they hide only where Link is in front of them; the scenery never hides them (their edges lie in its
+    surfaces, a little under them here and there, and are wanted through walls). The picture-sized depth
+    this first used (15 MiB at 2560x1440) and an RGBA8 layer were more than the game's heap gave.
+  Settings: scene > through walls (bars) and collision > through Link (lines) turn it off.
 - Without the GPU path (gpuui couldn't start), the game's type is drawn on the CPU, opaque, on gz's grid.
 
 Check the CPU drawing on the PC with `make nativepreview` and `obj/host/nativepreview <RomFS folder> out.ppm [scale]`.

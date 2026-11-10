@@ -16,7 +16,7 @@
 
 float sqrtf(float x); /* from sdk */
 
-bool enemy_hp_shown;
+bool enemy_hp_shown, enemy_hp_xray;
 
 #define MAX_ENEMIES 32
 #define MAX_RECTS 2048
@@ -34,6 +34,10 @@ bool enemy_hp_shown;
 #define CHAR_GAP 4.0f
 #define TEXT_GAP 6.0f       /* between the text and the bar */
 #define TEXT_PAD 3.0f       /* the text's dark background reaches this far round it */
+/* A point on an enemy counts as hidden where the scene is nearer than it by more than this (metres, and of
+ * its distance): the enemy's own body, round its middle, isn't */
+#define HIDDEN_M 0.5f
+#define HIDDEN_SHARE 0.04f
 
 /* --- rectangles ------------------------------------------------------------------------------------ */
 
@@ -124,8 +128,24 @@ static void add_enemy(aw_dot_t *out, int *n, eh_bar_t *bar_out, int *n_bar, cons
   if (sx < 0 || sx > 1 || sy < 0 || sy > 1)
     return;
   if (bar_out) {
-    if (*n_bar < MAX_ENEMIES)
-      bar_out[(*n_bar)++] = (eh_bar_t){ e->id, sx, sy, v[2], e->life, e->max_life };
+    if (*n_bar >= MAX_ENEMIES)
+      return;
+    eh_bar_t *bar = &bar_out[(*n_bar)++];
+    *bar = (eh_bar_t){ e->id, sx, sy, v[2], e->life, e->max_life, 0, { 0 }, { 0 }, { 0 } };
+    /* the points: a quarter, a half, three quarters of the way up, and the bar's (its bottom, over the head) */
+    for (int k = 1; k <= EH_PROBES; k++) {
+      float up[3] = { e->pos[0], e->pos[1] + e->height * k / EH_PROBES, e->pos[2] }, pv[3], px, py;
+      view_point(cam, up, pv);
+      if (pv[2] < cam->near)
+        continue;
+      view_screen(cam, pv, &px, &py);
+      if (px < 0 || px > 1 || py < 0 || py > 1)
+        continue;
+      bar->probe_x[bar->n_probes] = px;
+      bar->probe_y[bar->n_probes] = py;
+      bar->probe_depth[bar->n_probes] = view_depth(cam, pv[2] - HIDDEN_M - HIDDEN_SHARE * pv[2]);
+      bar->n_probes++;
+    }
     return;
   }
   float cx = sx * REF_WIDTH, bottom = sy * REF_HEIGHT;

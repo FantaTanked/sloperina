@@ -84,7 +84,9 @@ typedef struct {
   int32_t levitate_walls;
   int32_t airwalls_shown;
   int32_t airwalls_all;
+  int32_t airwalls_xray;
   int32_t enemy_hp;
+  int32_t enemy_hp_xray;
   int32_t menu_style;
 } snapshot_t;
 
@@ -140,7 +142,9 @@ static snapshot_t take_snapshot(void)
   s.levitate_walls = levitate_through_walls;
   s.airwalls_shown = airwalls_shown;
   s.airwalls_all = airwalls_all;
+  s.airwalls_xray = airwalls_xray;
   s.enemy_hp = enemy_hp_shown;
+  s.enemy_hp_xray = enemy_hp_xray;
   s.menu_style = gfx_style;
   return s;
 }
@@ -206,7 +210,9 @@ static void apply_snapshot(const snapshot_t *s)
   levitate_through_walls = s->levitate_walls != 0;
   airwalls_shown = s->airwalls_shown != 0;
   airwalls_all = s->airwalls_all != 0;
+  airwalls_xray = s->airwalls_xray != 0;
   enemy_hp_shown = s->enemy_hp != 0;
+  enemy_hp_xray = s->enemy_hp_xray != 0;
 }
 
 /* --- reading the file ------------------------------------------------------------------------- */
@@ -277,7 +283,9 @@ static const struct { const char *key; size_t field_offset; } int_keys[] = {
   INT_KEY("levitate_through_walls", levitate_walls),
   INT_KEY("airwalls_shown", airwalls_shown),
   INT_KEY("airwalls_all", airwalls_all),
+  INT_KEY("airwalls_xray", airwalls_xray),
   INT_KEY("enemy_health", enemy_hp),
+  INT_KEY("enemy_health_xray", enemy_hp_xray),
   INT_KEY("menu_style", menu_style),
 };
 #define N_INT_KEYS (sizeof(int_keys) / sizeof(*int_keys))

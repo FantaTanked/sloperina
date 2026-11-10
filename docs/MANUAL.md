@@ -110,7 +110,8 @@ and you'll come out at the chosen place. Under **return**: the **current** map a
 |---|---|
 | **reload map** | Reloads the current map (at the age set in **link**). |
 | **collision** | See below. |
-| **enemy health** | A bar with **life/max** over each living enemy within 30 m of Link (red under a quarter); it goes when the enemy reaches 0. Enemies that haven't appeared yet (Wolfos still in the ground, Stalfos before they drop) have none, and none are drawn while the game is paused. |
+| **enemy health** | A bar with **life/max** over each living enemy within 30 m of Link (red under a quarter); it goes when the enemy reaches 0. Enemies that haven't appeared yet (Wolfos still in the ground, Stalfos before they drop) have none, and none are drawn while the game is paused. In the game's style a bar fades out while its enemy is hidden behind walls or other scenery. |
+| **through walls** | Also show the bars of enemies hidden behind the scenery (the game's style). |
 
 #### 2.3.1 Collision
 
@@ -120,9 +121,11 @@ and you'll come out at the chosen place. Under **return**: the **current** map a
 |---|---|
 | **show** | Draw them. **Cyan**: walls that stop Link. **Red**: a wall Link is inside. **Violet**: other kinds. |
 | **all kinds** | Also draw the walls meant for enemies, NPCs and objects. |
+| **through Link** | Also draw them where Link is in front of them (in the game's style they're hidden behind him). |
 
 The two lines under them count the walls in this map and those near you, and say whether Link is inside one
-(how deep, and which way the game will push him out). Outlines are drawn on top of everything, through scenery.
+(how deep, and which way the game will push him out). Outlines show through the scenery; in the game's style
+Link stays in front of them.
 
 ### 2.4 Cheats
 

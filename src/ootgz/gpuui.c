@@ -49,7 +49,10 @@ enum {
   FMT_R8 = 0x01, FMT_RG32F = 0x16, FMT_ASTC_4X4 = 0x79, TARGET_2D = 1,
   SWIZZLE_ONE = 1, SWIZZLE_R = 2, FILTER_LINEAR = 1, WRAP_CLAMP_TO_EDGE = 7,
   BARRIER_ORDER_PRIMITIVES = 1, BARRIER_ORDER_FRAGMENTS = 2, BARRIER_INVALIDATE_TEXTURE = 0x10,
-  BARRIER_INVALIDATE_TEXTURE_DESCRIPTOR = 0x40,
+  BARRIER_INVALIDATE_TEXTURE_DESCRIPTOR = 0x40, BARRIER_INVALIDATE_ZCULL = 0x80,
+  DEPTH_FUNC_LESS = 2, DEPTH_FUNC_LEQUAL = 4, DEPTH_FUNC_ALWAYS = 8, DEPTH_MODE_NEAR_IS_MINUS_W = 0,
+  TEXTURE_COMPRESSIBLE = 0x8, POOL_CPU_NO_ACCESS = 0x01, POOL_COMPRESSIBLE = 0x80,
+  CLEAR_ALL_CHANNELS = 0xF,
   INFO_TEXTURE_DESCRIPTOR_SIZE = 0xF, INFO_SAMPLER_DESCRIPTOR_SIZE = 0x10, INFO_RESERVED_TEXTURES = 0x11,
   INFO_RESERVED_SAMPLERS = 0x12,
 };
@@ -168,6 +171,23 @@ static struct {
 } gi;
 static const char *const gi_names[] = { "nvnTextureBuilderSetPackagedTextureLayout", "nvnMemoryPoolFlushMappedRange",
                                         "nvnDeviceGetInteger" };
+
+/* only for hiding the lines behind Link (gpuui_depth): without them, the lines show through him */
+static struct {
+  void (*depth_func)(void *, int);
+  void (*cmd_depth_range)(nvn_obj_t *, float, float);
+  void (*cmd_clear_depth)(nvn_obj_t *, float, bool, int, int);
+  int (*depth_mode)(const nvn_device_t *);
+  void (*cmd_clear_colour)(nvn_obj_t *, int, const float *, int);
+  void (*view_defaults)(void *);
+  void (*view_swizzle)(void *, int, int, int, int);
+} gd;
+static const char *const gd_names[] = { "nvnDepthStencilStateSetDepthFunc", "nvnCommandBufferSetDepthRange",
+                                        "nvnCommandBufferClearDepthStencil", "nvnDeviceGetDepthMode",
+                                        "nvnCommandBufferClearColor", "nvnTextureViewSetDefaults",
+                                        "nvnTextureViewSetSwizzle" };
+_Static_assert(sizeof(gd_names) / sizeof(*gd_names) == sizeof(gd) / sizeof(void *), "gpuui depth functions");
+static bool depth_usable;
 _Static_assert(sizeof(gi_names) / sizeof(*gi_names) == sizeof(gi) / sizeof(void *), "gpuui image functions");
 
 /* --- objects and memory ------------------------------------------------------------------------------ */
@@ -181,7 +201,7 @@ static size_t code_size;
 static nvn_addr_t code_gpu, data_gpu;
 static nvn_obj_t programs[UI_PROGRAMS];
 static shader_data_t shader_data[UI_PROGRAMS][2];
-static nvn_obj_t blend, colour, channels, multisample, polygon, depth;
+static nvn_obj_t blend, colour, channels, multisample, polygon, depth, depth_tested, depth_beyond, depth_far;
 static _Alignas(16) uint8_t attribs[2 * 4]; /* NVN 2's vertex attribute state is 4 bytes (the game's stride) */
 static _Alignas(16) uint8_t streams[8];     /* ... its vertex stream state 8 */
 static nvn_obj_t atlas_builder, atlas, sampler_builder, sampler, texture_pool, sampler_pool;
@@ -199,7 +219,7 @@ static int device_info(int item, int fallback, int most)
 }
 
 /* the data pool's layout */
-static size_t off_vertices, off_view, off_shadow, off_material, off_materials, off_textures, off_samplers, off_elements,
+static size_t off_vertices, off_view, off_shadow, off_material, off_mask, off_materials, off_textures, off_samplers, off_elements,
   off_staging, off_atlas, data_size;
 
 static size_t round_up(size_t n, size_t to) { return (n + to - 1) / to * to; }
@@ -269,6 +289,16 @@ static void make_states(void)
   g.depth_defaults(&depth);
   g.depth_test(&depth, false);
   g.depth_write(&depth, false);
+  if (depth_usable) { /* the lines behind Link (gpuui_depth): */
+    nvn_obj_t *states[3] = { &depth_tested, &depth_beyond, &depth_far };
+    static const int funcs[3] = { DEPTH_FUNC_LEQUAL, DEPTH_FUNC_LESS, DEPTH_FUNC_ALWAYS };
+    for (int i = 0; i < 3; i++) {
+      g.depth_defaults(states[i]);
+      g.depth_test(states[i], true);
+      g.depth_write(states[i], i == 2); /* only the far depth is written (where the scene isn't Link) */
+      gd.depth_func(states[i], funcs[i]);
+    }
+  }
   for (int i = 0; i < 2; i++) {
     g.attrib_defaults(attribs + 4 * i);
     g.attrib_format(attribs + 4 * i, FMT_RG32F, 0); /* both read the corner: _p0 scaled by the size, _u0 as is */
@@ -299,11 +329,13 @@ static bool make_data(void)
   off_view = at, at += UNIFORM_SIZE * SLOTS;
   off_shadow = at, at += UNIFORM_SIZE;
   off_material = at, at += UNIFORM_SIZE;
+  off_mask = at, at += UNIFORM_SIZE;
   off_materials = at, at += (size_t)SLOTS * MAX_MATERIALS * UNIFORM_SIZE;
   at = round_up(at, PAGE);
   texture_descriptor = device_info(INFO_TEXTURE_DESCRIPTOR_SIZE, 32, 256);
   sampler_descriptor = device_info(INFO_SAMPLER_DESCRIPTOR_SIZE, 32, 256);
-  our_texture_id = device_info(INFO_RESERVED_TEXTURES, 256, POOL_ENTRIES - 1 - GPU_IMAGES);
+  our_texture_id = device_info(INFO_RESERVED_TEXTURES, 256, POOL_ENTRIES - 2 - GPU_IMAGES); /* the atlas, the
+                                                                                    pictures, the lines' layer */
   our_sampler_id = device_info(INFO_RESERVED_SAMPLERS, 256, POOL_ENTRIES - 1);
   off_textures = at, at += (size_t)POOL_ENTRIES * texture_descriptor;
   at = round_up(at, PAGE);
@@ -329,6 +361,10 @@ static bool make_data(void)
   uint32_t discard_clear = 0x2; /* flags, an int: discard where alpha is 0 */
   __builtin_memcpy(&material[10], &discard_clear, 4);
   __builtin_memcpy(data_mem + off_material, material, sizeof(material));
+  /* Link's mask (the lines' layer, sampled as 1, 1, 1, R) to its opposite's alpha: 0 (discarded) on him */
+  float mask[16] = { 0, 0, 0, -1, 1, 1, 1, 1, 1, 1 };
+  __builtin_memcpy(&mask[10], &discard_clear, 4);
+  __builtin_memcpy(data_mem + off_mask, mask, sizeof(mask));
 
   g.tb_storage(&atlas_builder, &data_pool, (ptrdiff_t)off_atlas);
   if (!g.texture_init(&atlas, &atlas_builder))
@@ -364,6 +400,10 @@ bool gpuui_init(getproc_t getproc, nvn_device_t *dev)
   void **optional = (void **)&gi;
   for (unsigned i = 0; i < sizeof(gi_names) / sizeof(*gi_names); i++)
     optional[i] = getproc(dev, gi_names[i]);
+  void **for_depth = (void **)&gd;
+  depth_usable = true;
+  for (unsigned i = 0; i < sizeof(gd_names) / sizeof(*gd_names); i++)
+    depth_usable &= (for_depth[i] = getproc(dev, gd_names[i])) != 0;
   if (!make_programs()) {
     log_printf("gpu drawing: the ui shader's programs didn't build");
     return false;
@@ -482,12 +522,15 @@ typedef struct {
   bool textured;
   int8_t image;        /* textured: the atlas (-1) or a picture (gpuui_image) */
   uint8_t material;    /* 0 the plain material, else 1 + a frame's mapping */
+  bool depth_tested;   /* hidden where the frame's depth is nearer (gpuui_line_depth) */
+  uint8_t layer;       /* depth_tested: its colour's layer */
   float scale, sx, sy; /* gpuui_scale's when it was made */
+  float alpha;         /* gpuui_alpha's */
 } quad_t;
 
 static quad_t quads[MAX_QUADS];
 static int n_quads;
-static float quad_scale = 1, quad_sx, quad_sy;
+static float quad_scale = 1, quad_sx, quad_sy, quad_alpha = 1;
 /* the frame's colour mappings: UiMaterial's colour scale (white - black) and offset (black), its words 0-7,
  * alpha too (the shader clamps the alpha it maps before the corner colours' alpha multiplies it) */
 static struct { gpu_colour_t black, white; } mappings[MAX_MATERIALS];
@@ -495,6 +538,25 @@ static int n_mappings;
 
 static bool atlas_full;
 static nvn_texture_t *frame_target;
+static const nvn_texture_t *frame_depth; /* gpuui_depth's */
+static bool frame_depth_clear;
+/* The lines' layer: an R8 coverage at the depth's size. The depth tested quads go into it a colour at a time,
+ * in white (with their alpha), against the depth; it's then laid over the picture in that colour (sampled as
+ * 1, 1, 1, coverage). A colour's layer is the same as drawing its lines straight onto the picture: over the
+ * background B, a glow g then a line l of colour c give c (l + g - g l) + B (1 - g) (1 - l). */
+#define IMAGE_LAYER (-2)
+#define LAYER_COLOURS 4 /* the colours a frame's depth tested quads may have (the air walls have 3) */
+#define MASK_QUADS 4    /* Link's mask: three, and the far depth round him */
+#define MATERIAL_MASK 0xFF
+static gpu_occluder_t frame_only; /* gpuui_depth's: Link's box */
+static nvn_obj_t layer_pool, layer, layer_view;
+static gpu_colour_t layer_colours[LAYER_COLOURS];
+static int n_layer_colours;
+static uint8_t *layer_mem;
+static int layer_w, layer_h;
+static nvn_handle_t layer_handle;
+static bool layer_failed;
+static bool descriptors_new; /* textures registered this frame: the GPU's descriptor cache is stale */
 static nvn_rect_t frame_area;
 static int frame_texture_height, frame_slot;
 static bool frame_lower_left;
@@ -509,7 +571,11 @@ void gpuui_begin(nvn_texture_t *target, nvn_rect_t area, int texture_height, boo
   n_quads = 0;
   n_mappings = 0;
   quad_scale = 1;
+  quad_alpha = 1;
   frame_target = target;
+  frame_depth = 0;
+  frame_depth_clear = false;
+  n_layer_colours = 0;
   frame_area = area;
   frame_texture_height = texture_height;
   frame_lower_left = origin_lower_left;
@@ -523,9 +589,11 @@ void gpuui_begin(nvn_texture_t *target, nvn_rect_t area, int texture_height, boo
 
 static quad_t *new_quad(void)
 {
-  if (ready && n_quads < MAX_QUADS) {
+  if (ready && n_quads < MAX_QUADS - LAYER_COLOURS - MASK_QUADS) { /* the last elements are the lines' layer's */
     quads[n_quads].material = 0;
+    quads[n_quads].depth_tested = false;
     quads[n_quads].scale = quad_scale, quads[n_quads].sx = quad_sx, quads[n_quads].sy = quad_sy;
+    quads[n_quads].alpha = quad_alpha;
     return &quads[n_quads++];
   }
   static bool warned;
@@ -538,6 +606,71 @@ static quad_t *new_quad(void)
 void gpuui_scale(float s, float ox, float oy)
 {
   quad_scale = s, quad_sx = ox, quad_sy = oy;
+}
+
+void gpuui_alpha(float a)
+{
+  quad_alpha = a < 0 ? 0 : a > 1 ? 1 : a;
+}
+
+/* the lines' layer, R8 w x h, a render target that's also sampled (as 1, 1, 1, R) */
+static bool make_layer(int w, int h)
+{
+  nvn_obj_t builder;
+  __builtin_memset(&builder, 0, sizeof(builder));
+  g.tb_device(&builder, device);
+  g.tb_defaults(&builder);
+  g.tb_target(&builder, TARGET_2D);
+  g.tb_format(&builder, FMT_R8);
+  g.tb_size(&builder, w, h);
+  g.tb_levels(&builder, 1);
+  g.tb_flags(&builder, TEXTURE_COMPRESSIBLE);
+  size_t size = g.tb_storage_size(&builder), align = g.tb_storage_align(&builder);
+  if (align < PAGE)
+    align = PAGE;
+  size = round_up(size, align);
+  layer_mem = aligned_alloc(align, size);
+  if (!layer_mem || !make_pool(&layer_pool, layer_mem, size, POOL_CPU_NO_ACCESS | POOL_GPU_CACHED | POOL_COMPRESSIBLE)) {
+    log_printf("gpu drawing: no memory for the lines' layer (%u KiB); they show through Link",
+               (unsigned)(size / 1024));
+    free(layer_mem);
+    layer_mem = 0;
+    return false;
+  }
+  g.tb_storage(&builder, &layer_pool, 0);
+  if (!g.texture_init(&layer, &builder)) {
+    log_printf("gpu drawing: the lines' layer didn't initialise");
+    return false;
+  }
+  int id = our_texture_id + 1 + GPU_IMAGES; /* after the atlas and the pictures */
+  gd.view_defaults(&layer_view);
+  gd.view_swizzle(&layer_view, SWIZZLE_ONE, SWIZZLE_ONE, SWIZZLE_ONE, SWIZZLE_R);
+  g.texture_pool_register(&texture_pool, id, &layer, &layer_view);
+  layer_handle = g.texture_handle(device, id, our_sampler_id);
+  descriptors_new = true;
+  layer_w = w, layer_h = h;
+  log_printf("gpu drawing: the lines' layer %dx%d (%u KiB)", w, h, (unsigned)(size / 1024));
+  return true;
+}
+
+bool gpuui_depth(const nvn_texture_t *depth_target, int w, int h, bool clear, const gpu_occluder_t *only)
+{
+  frame_depth = 0;
+  frame_depth_clear = false;
+  if (!depth_target || !only || !depth_usable || w <= 0 || h <= 0)
+    return true;
+  frame_only = *only;
+  if (layer_failed)
+    return false;
+  if (!layer_mem && !make_layer(w, h)) {
+    layer_failed = true;
+    return false;
+  }
+  if (w != layer_w || h != layer_h)
+    return true; /* not the size it was made for: shown through, this frame */
+  frame_depth = depth_target;
+  frame_depth_clear = clear;
+  return true;
 }
 
 static void set_translate(quad_t *q, float x, float y)
@@ -613,6 +746,52 @@ void gpuui_line(float x0, float y0, float x1, float y1, float width, gpu_colour_
   __builtin_memcpy(q->st, st, sizeof(st));
   q->textured = true;
   q->image = -1;
+}
+
+/* a depth (0..1, as the game's depth buffer has it) as the clip z that gives it: NVN's GL depth mode (the
+ * game's) maps clip z -1..1 to depth 0..1, its other one takes z as the depth */
+static float clip_z(float d)
+{
+  bool gl = !gd.depth_mode || gd.depth_mode(device) == DEPTH_MODE_NEAR_IS_MINUS_W;
+  return gl ? 2 * d - 1 : d;
+}
+
+/* quad q (translated, not turned) at a plane's depth: p[0] x + p[1] y + p[2], x and y 0..1 of the frame's area.
+ * Linear on the picture, so the matrix's third row gives it (clip z from the quad's own x and y); where it's
+ * past the far plane (the sky side of the ground's horizon) the quad is clipped */
+static void plane_z(quad_t *q, const float p[3])
+{
+  float sw = (float)frame_area.w, sh = (float)frame_area.h, k = clip_z(1) - clip_z(0);
+  q->m[8] = k * p[0] / sw;
+  q->m[9] = k * p[1] / sh;
+  q->m[11] = k * (p[0] * q->m[3] / sw + p[1] * q->m[7] / sh + p[2]) + clip_z(0);
+}
+
+void gpuui_line_depth(float x0, float y0, float d0, float x1, float y1, float d1, float width, gpu_colour_t colour)
+{
+  int before = n_quads;
+  gpuui_line(x0, y0, x1, y1, width, colour);
+  if (n_quads == before || !frame_depth)
+    return;
+  /* the depth along it: the matrix's third row gives clip z from the quad's own x (0 to its length), and the
+   * view passes it on with w 1. The depth along a line on the picture is linear in the picture, as the
+   * scene's is (1 / distance is). */
+  quad_t *q = &quads[n_quads - 1];
+  int k = 0; /* its colour's layer */
+  while (k < n_layer_colours && (layer_colours[k].r != colour.r || layer_colours[k].g != colour.g ||
+                                 layer_colours[k].b != colour.b))
+    k++;
+  if (k == LAYER_COLOURS)
+    return; /* one colour too many: drawn as gpuui_line */
+  if (k == n_layer_colours)
+    layer_colours[n_layer_colours++] = colour;
+  q->layer = (uint8_t)k;
+  for (int i = 0; i < 4; i++) /* white: its colour comes with the layer */
+    q->c[i] = (gpu_colour_t){ 1, 1, 1, colour.a };
+  float z0 = clip_z(d0), z1 = clip_z(d1);
+  q->m[8] = (z1 - z0) / q->w;
+  q->m[11] = z0;
+  q->depth_tested = true;
 }
 
 void gpuui_rect_turned(float cx, float cy, float w, float h, float angle, gpu_colour_t colour)
@@ -701,7 +880,6 @@ static gpu_image_t image_info[GPU_IMAGES];
 static nvn_obj_t image_builder, image_tex[GPU_IMAGES];
 static nvn_handle_t image_handle[GPU_IMAGES];
 static bool image_ok[GPU_IMAGES];
-static bool descriptors_new; /* pictures registered this frame: the GPU's descriptor cache is stale */
 
 void gpuui_images_publish(int batch, int first, uint8_t *mem, size_t size, const gpu_image_t *images, int n)
 {
@@ -952,7 +1130,7 @@ static void write_element(uint8_t *at, const quad_t *q)
     e[12 + 4 * i] = q->c[i].r;
     e[13 + 4 * i] = q->c[i].g;
     e[14 + 4 * i] = q->c[i].b;
-    e[15 + 4 * i] = q->c[i].a;
+    e[15 + 4 * i] = q->c[i].a * q->alpha;
   }
   e[28] = q->w;
   e[29] = q->h;
@@ -963,35 +1141,9 @@ static void write_element(uint8_t *at, const quad_t *q)
   __builtin_memcpy(at, e, sizeof(e));
 }
 
-void gpuui_end(nvn_obj_t *cmd, const void *game_texture_pool, const void *game_sampler_pool)
+/* the state a frame's passes start from */
+static void bind_frame(nvn_obj_t *cmd, size_t view_at)
 {
-  if (!ready || !n_quads)
-    return;
-  icons_up(cmd);
-  if (descriptors_new) { /* the pictures' descriptors, read fresh */
-    g.cmd_barrier(cmd, BARRIER_INVALIDATE_TEXTURE_DESCRIPTOR);
-    descriptors_new = false;
-  }
-  /* the rows the frame's new glyphs touched, up before they're drawn */
-  if (dirty_bottom > dirty_top) {
-    g.cmd_copy_stride(cmd, 0);
-    nvn_region_t rows = { 0, dirty_top, 0, ATLAS_W, dirty_bottom - dirty_top, 1 };
-    g.cmd_copy_to_texture(cmd, data_gpu + off_staging + (nvn_addr_t)dirty_top * ATLAS_W, &atlas, 0, &rows, 0);
-    g.cmd_barrier(cmd, BARRIER_ORDER_PRIMITIVES | BARRIER_ORDER_FRAGMENTS | BARRIER_INVALIDATE_TEXTURE);
-    dirty_top = ATLAS_H;
-    dirty_bottom = 0;
-  }
-  /* the view: the visible area's pixels, y down, to clip space (column-major) */
-  float sw = (float)frame_area.w, sh = (float)frame_area.h;
-  float view[16] = { 2 / sw, 0, 0, 0, 0, -2 / sh, 0, 0, 0, 0, 1, 0, -1, 1, 0, 1 };
-  size_t view_at = off_view + (size_t)frame_slot * UNIFORM_SIZE;
-  __builtin_memcpy(data_mem + view_at, view, sizeof(view));
-
-  int vy = frame_lower_left ? frame_texture_height - frame_area.y - frame_area.h : frame_area.y;
-  g.cmd_render_enable(cmd, true);
-  g.cmd_targets(cmd, 1, &frame_target, 0, 0, 0);
-  g.cmd_viewport(cmd, frame_area.x, vy, frame_area.w, frame_area.h);
-  g.cmd_scissor(cmd, frame_area.x, vy, frame_area.w, frame_area.h);
   g.cmd_blend(cmd, &blend);
   g.cmd_colour(cmd, &colour);
   g.cmd_channels(cmd, &channels);
@@ -1007,6 +1159,63 @@ void gpuui_end(nvn_obj_t *cmd, const void *game_texture_pool, const void *game_s
   g.cmd_texture_pool(cmd, &texture_pool);
   g.cmd_sampler_pool(cmd, &sampler_pool);
   g.cmd_texture(cmd, STAGE_FRAGMENT, 8, atlas_handle);
+}
+
+/* what a pass has bound: its program, its picture (-1 the atlas), its material */
+typedef struct { int program, image, material; } draw_state_t;
+
+/* quad q, its element at `at`; false: out of command memory */
+static bool draw_quad(nvn_obj_t *cmd, const quad_t *q, size_t at, size_t materials, draw_state_t *st)
+{
+  if (g.cmd_free(cmd) < CMD_RESERVE)
+    return false;
+  int program = q->textured ? UI_PROGRAM_TEXTURE : UI_PROGRAM_SOLID;
+  if (program != st->program) {
+    g.cmd_program(cmd, &programs[program], STAGES_GRAPHICS);
+    st->program = program;
+  }
+  if (q->material != st->material) { /* the plain material (bound by bind_frame), a mapping or Link's mask's */
+    st->material = q->material;
+    nvn_addr_t m = st->material == MATERIAL_MASK ? data_gpu + off_mask
+                   : st->material ? data_gpu + materials + (size_t)(st->material - 1) * UNIFORM_SIZE
+                                  : data_gpu + off_material;
+    g.cmd_uniform(cmd, STAGE_FRAGMENT, 4, m, 64);
+  }
+  if (q->textured && q->image != st->image) { /* the atlas (bound by bind_frame), a picture or the lines' layer */
+    st->image = q->image;
+    g.cmd_texture(cmd, STAGE_FRAGMENT, 8,
+                  st->image == IMAGE_LAYER ? layer_handle : st->image < 0 ? atlas_handle : image_handle[st->image]);
+  }
+  write_element(data_mem + at, q);
+  g.cmd_storage(cmd, STAGE_VERTEX, 6, data_gpu + at, ELEMENT_SIZE);
+  g.cmd_draw(cmd, PRIM_TRIANGLE_STRIP, 0, 4);
+  return true;
+}
+
+bool gpuui_end(nvn_obj_t *cmd, const void *game_texture_pool, const void *game_sampler_pool)
+{
+  if (!ready || !n_quads)
+    return false;
+  icons_up(cmd);
+  if (descriptors_new) { /* the pictures' descriptors, read fresh */
+    g.cmd_barrier(cmd, BARRIER_INVALIDATE_TEXTURE_DESCRIPTOR);
+    descriptors_new = false;
+  }
+  /* the rows the frame's new glyphs touched, up before they're drawn */
+  if (dirty_bottom > dirty_top) {
+    g.cmd_copy_stride(cmd, 0);
+    nvn_region_t rows = { 0, dirty_top, 0, ATLAS_W, dirty_bottom - dirty_top, 1 };
+    g.cmd_copy_to_texture(cmd, data_gpu + off_staging + (nvn_addr_t)dirty_top * ATLAS_W, &atlas, 0, &rows, 0);
+    g.cmd_barrier(cmd, BARRIER_ORDER_PRIMITIVES | BARRIER_ORDER_FRAGMENTS | BARRIER_INVALIDATE_TEXTURE);
+    dirty_top = ATLAS_H;
+    dirty_bottom = 0;
+  }
+  /* the view: the visible area's pixels, y down, to clip space (column-major); the lines' layer is the same
+   * area at its own size */
+  float sw = (float)frame_area.w, sh = (float)frame_area.h;
+  float view[16] = { 2 / sw, 0, 0, 0, 0, -2 / sh, 0, 0, 0, 0, 1, 0, -1, 1, 0, 1 };
+  size_t view_at = off_view + (size_t)frame_slot * UNIFORM_SIZE;
+  __builtin_memcpy(data_mem + view_at, view, sizeof(view));
 
   /* the frame's colour mappings, in its slot's place: black and white of the texture to two colours */
   size_t materials = off_materials + (size_t)frame_slot * MAX_MATERIALS * UNIFORM_SIZE;
@@ -1017,34 +1226,108 @@ void gpuui_end(nvn_obj_t *cmd, const void *game_texture_pool, const void *game_s
     __builtin_memcpy(&words[10], &discard_clear, 4);
     __builtin_memcpy(data_mem + materials + (size_t)m * UNIFORM_SIZE, words, sizeof(words));
   }
-  int bound = -1, bound_image = -1, bound_material = 0;
   size_t elements = off_elements + (size_t)frame_slot * MAX_QUADS * ELEMENT_SIZE;
-  for (int i = 0; i < n_quads; i++) {
-    if (g.cmd_free(cmd) < CMD_RESERVE)
-      break;
-    int program = quads[i].textured ? UI_PROGRAM_TEXTURE : UI_PROGRAM_SOLID;
-    if (program != bound) {
-      g.cmd_program(cmd, &programs[program], STAGES_GRAPHICS);
-      bound = program;
-    }
-    if (quads[i].material != bound_material) { /* the plain material (bound above) or a mapping */
-      bound_material = quads[i].material;
-      nvn_addr_t at = bound_material ? data_gpu + materials + (size_t)(bound_material - 1) * UNIFORM_SIZE
-                                     : data_gpu + off_material;
-      g.cmd_uniform(cmd, STAGE_FRAGMENT, 4, at, 64);
-    }
-    if (quads[i].textured && quads[i].image != bound_image) { /* the atlas (bound above) or a picture */
-      bound_image = quads[i].image;
-      g.cmd_texture(cmd, STAGE_FRAGMENT, 8, bound_image < 0 ? atlas_handle : image_handle[bound_image]);
-    }
-    size_t at = elements + (size_t)i * ELEMENT_SIZE;
-    write_element(data_mem + at, &quads[i]);
-    g.cmd_storage(cmd, STAGE_VERTEX, 6, data_gpu + at, ELEMENT_SIZE);
-    g.cmd_draw(cmd, PRIM_TRIANGLE_STRIP, 0, 4);
+
+  bool layered = frame_depth && (n_layer_colours || frame_depth_clear);
+  int vy = frame_lower_left ? frame_texture_height - frame_area.y - frame_area.h : frame_area.y;
+  g.cmd_render_enable(cmd, true);
+  /* the lines' layer a colour at a time: cleared, its depth tested quads drawn into it against that depth, then
+   * over the picture */
+  /* Only Link hides the lines: the scene's depth is made his alone first. Into the layer, his mask: what of the
+   * depth is in his box (in the rectangle, between the depths in front of and behind him); then the depth goes
+   * to the far plane wherever the mask isn't (a quad over it all at the far plane, discarded on the mask) */
+  nvn_texture_t *layer_target = (nvn_texture_t *)&layer;
+  static const float clear[4] = { 0, 0, 0, 0 };
+  size_t extra = elements + (size_t)(MAX_QUADS - LAYER_COLOURS - MASK_QUADS) * ELEMENT_SIZE;
+  if (layered) {
+    g.cmd_barrier(cmd, BARRIER_ORDER_PRIMITIVES | BARRIER_ORDER_FRAGMENTS | BARRIER_INVALIDATE_ZCULL);
+    g.cmd_targets(cmd, 1, &layer_target, 0, frame_depth, 0);
+    g.cmd_viewport(cmd, 0, 0, layer_w, layer_h);
+    g.cmd_scissor(cmd, 0, 0, layer_w, layer_h);
+    gd.cmd_depth_range(cmd, 0, 1);
+    gd.cmd_clear_colour(cmd, 0, clear, CLEAR_ALL_CHANNELS);
+    if (frame_depth_clear) /* new: the far plane, before the game's depth is first copied in */
+      gd.cmd_clear_depth(cmd, 1, true, 0, 0);
+    bind_frame(cmd, view_at);
+    draw_state_t st = { -1, -1, 0 };
+    float rx = frame_only.x0 * sw, ry = frame_only.y0 * sh, rw = (frame_only.x1 - frame_only.x0) * sw,
+          rh = (frame_only.y1 - frame_only.y0) * sh;
+    quad_t in_front = { .c = { { 1, 1, 1, 1 }, { 1, 1, 1, 1 }, { 1, 1, 1, 1 }, { 1, 1, 1, 1 } }, .w = rw, .h = rh,
+                        .scale = 1, .alpha = 1 };
+    set_translate(&in_front, rx, ry);
+    quad_t behind = in_front, ground;
+    for (int i = 0; i < 4; i++)
+      behind.c[i] = (gpu_colour_t){ 0, 0, 0, 1 };
+    ground = behind;
+    plane_z(&in_front, frame_only.front); /* white where the depth is at his front or beyond */
+    plane_z(&behind, frame_only.back);    /* black again where it's past his back */
+    plane_z(&ground, frame_only.ground);  /* and where it's at the ground or under it */
+    g.cmd_depth(cmd, &depth_tested);
+    draw_quad(cmd, &in_front, extra, materials, &st);
+    g.cmd_depth(cmd, &depth_beyond);
+    draw_quad(cmd, &behind, extra + ELEMENT_SIZE, materials, &st);
+    g.cmd_depth(cmd, &depth_tested);
+    draw_quad(cmd, &ground, extra + 3 * ELEMENT_SIZE, materials, &st);
+    g.cmd_barrier(cmd, BARRIER_ORDER_PRIMITIVES | BARRIER_ORDER_FRAGMENTS | BARRIER_INVALIDATE_TEXTURE);
+    g.cmd_targets(cmd, 0, 0, 0, frame_depth, 0); /* the depth alone: the layer is read */
+    g.cmd_viewport(cmd, 0, 0, layer_w, layer_h);
+    g.cmd_scissor(cmd, 0, 0, layer_w, layer_h);
+    quad_t far = { .c = { { 1, 1, 1, 1 }, { 1, 1, 1, 1 }, { 1, 1, 1, 1 }, { 1, 1, 1, 1 } }, .w = sw, .h = sh,
+                   .textured = true, .image = IMAGE_LAYER, .material = MATERIAL_MASK, .scale = 1, .alpha = 1 };
+    set_translate(&far, 0, 0);
+    float t0 = frame_lower_left ? 1 : 0, t1 = 1 - t0;
+    float layer_st[8] = { 0, t0, 1, t0, 0, t1, 1, t1 };
+    __builtin_memcpy(far.st, layer_st, sizeof(layer_st));
+    far.m[11] = clip_z(1);
+    g.cmd_depth(cmd, &depth_far);
+    draw_quad(cmd, &far, extra + 2 * ELEMENT_SIZE, materials, &st);
+    g.cmd_depth(cmd, &depth);
+    g.cmd_barrier(cmd, BARRIER_ORDER_PRIMITIVES | BARRIER_ORDER_FRAGMENTS | BARRIER_INVALIDATE_ZCULL);
   }
+  for (int k = 0; layered && k < n_layer_colours; k++) {
+    if (k) /* the layer's last colour has been laid over the picture */
+      g.cmd_barrier(cmd, BARRIER_ORDER_PRIMITIVES | BARRIER_ORDER_FRAGMENTS);
+    g.cmd_targets(cmd, 1, &layer_target, 0, frame_depth, 0);
+    g.cmd_viewport(cmd, 0, 0, layer_w, layer_h);
+    g.cmd_scissor(cmd, 0, 0, layer_w, layer_h);
+    gd.cmd_clear_colour(cmd, 0, clear, CLEAR_ALL_CHANNELS);
+    bind_frame(cmd, view_at);
+    g.cmd_depth(cmd, &depth_tested);
+    draw_state_t st = { -1, -1, 0 };
+    for (int i = 0; i < n_quads; i++)
+      if (quads[i].depth_tested && quads[i].layer == k &&
+          !draw_quad(cmd, &quads[i], elements + (size_t)i * ELEMENT_SIZE, materials, &st))
+        break;
+    g.cmd_depth(cmd, &depth);
+    g.cmd_barrier(cmd, BARRIER_ORDER_PRIMITIVES | BARRIER_ORDER_FRAGMENTS | BARRIER_INVALIDATE_TEXTURE);
+    /* over the picture, in its colour, the whole area */
+    g.cmd_targets(cmd, 1, &frame_target, 0, 0, 0);
+    g.cmd_viewport(cmd, frame_area.x, vy, frame_area.w, frame_area.h);
+    g.cmd_scissor(cmd, frame_area.x, vy, frame_area.w, frame_area.h);
+    gpu_colour_t c = layer_colours[k];
+    c.a = 1;
+    quad_t q = { .c = { c, c, c, c }, .w = sw, .h = sh, .textured = true, .image = IMAGE_LAYER, .scale = 1, .alpha = 1 };
+    set_translate(&q, 0, 0);
+    float t0 = frame_lower_left ? 1 : 0, t1 = 1 - t0;
+    float layer_st[8] = { 0, t0, 1, t0, 0, t1, 1, t1 };
+    __builtin_memcpy(q.st, layer_st, sizeof(layer_st));
+    st = (draw_state_t){ -1, -1, 0 };
+    draw_quad(cmd, &q, elements + (size_t)(MAX_QUADS - LAYER_COLOURS + k) * ELEMENT_SIZE, materials, &st);
+  }
+
+  g.cmd_targets(cmd, 1, &frame_target, 0, 0, 0);
+  g.cmd_viewport(cmd, frame_area.x, vy, frame_area.w, frame_area.h);
+  g.cmd_scissor(cmd, frame_area.x, vy, frame_area.w, frame_area.h);
+  bind_frame(cmd, view_at);
+  draw_state_t st = { -1, -1, 0 };
+  for (int i = 0; i < n_quads; i++) /* the rest (the depth tested ones went in the layer) */
+    if (!(quads[i].depth_tested && layered) &&
+        !draw_quad(cmd, &quads[i], elements + (size_t)i * ELEMENT_SIZE, materials, &st))
+      break;
   /* the game's descriptor pools back, for its next frame's commands */
   if (game_texture_pool)
     g.cmd_texture_pool(cmd, game_texture_pool);
   if (game_sampler_pool)
     g.cmd_sampler_pool(cmd, game_sampler_pool);
+  return layered;
 }

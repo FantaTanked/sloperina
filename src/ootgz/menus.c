@@ -1976,6 +1976,26 @@ static void set_air_walls_all(menu_item_t *it, bool on)
   airwalls_all = on;
 }
 
+static bool get_air_walls_xray(menu_item_t *it)
+{
+  return airwalls_xray;
+}
+
+static void set_air_walls_xray(menu_item_t *it, bool on)
+{
+  airwalls_xray = on;
+}
+
+static bool get_enemy_hp_xray(menu_item_t *it)
+{
+  return enemy_hp_xray;
+}
+
+static void set_enemy_hp_xray(menu_item_t *it, bool on)
+{
+  enemy_hp_xray = on;
+}
+
 static bool get_enemy_hp(menu_item_t *it)
 {
   return enemy_hp_shown;
@@ -2002,7 +2022,7 @@ static void text_air_wall_link(menu_item_t *it, char *buf, int len)
 
 static void build_scene(void)
 {
-  menu_init(&m_scene, "scene", 4);
+  menu_init(&m_scene, "scene", 5);
   menu_item_t *reload = menu_add_action(&m_scene, "reload map", act_reload_map, 0);
   if (reload)
     reload->hint = "L: reload this map (at the age set in the link menu)";
@@ -2012,9 +2032,15 @@ static void build_scene(void)
     enemy_hp->hint = "a bar and life/max over each enemy";
     enemy_hp->log_label = "enemy health:";
   }
+  menu_item_t *hp_xray = menu_add_check(&m_scene, "through walls", get_enemy_hp_xray, set_enemy_hp_xray, 0);
+  if (hp_xray) {
+    hp_xray->hint = "also the bars of enemies behind the scenery (the game's style)";
+    hp_xray->log_label = "enemy health through walls:";
+    hp_xray->indent = 1;
+  }
   menu_add_return(&m_scene);
 
-  menu_init(&m_collision, "collision", 6);
+  menu_init(&m_collision, "collision", 7);
   menu_add_heading(&m_collision, "air walls");
   menu_item_t *show = menu_add_check(&m_collision, "show", get_air_walls_shown, set_air_walls_shown, 0);
   if (show) {
@@ -2025,6 +2051,11 @@ static void build_scene(void)
   if (all_kinds) {
     all_kinds->hint = "also the walls for enemies, NPCs and objects";
     all_kinds->log_label = "all kinds:";
+  }
+  menu_item_t *xray = menu_add_check(&m_collision, "through Link", get_air_walls_xray, set_air_walls_xray, 0);
+  if (xray) {
+    xray->hint = "also where Link is in front of them (the game's style)";
+    xray->log_label = "air walls through Link:";
   }
   menu_add_text(&m_collision, text_air_wall_summary, 0);
   menu_add_text(&m_collision, text_air_wall_link, 0);

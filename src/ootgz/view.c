@@ -12,6 +12,12 @@ float sqrtf(float x);
 #define CAM_LOOK_AT 0x44
 #define CAM_FOV_Y 0x130
 #define CAM_ASPECT 0x140
+/* its projection's near and far planes (sead's PerspectiveProjection at +0x90; FINDINGS.md 9.6 "The scene's
+ * depth"), 0.1 and 25000 in the game's scenes */
+#define CAM_NEAR 0x128
+#define CAM_FAR 0x12C
+#define DEFAULT_NEAR 0.1f
+#define DEFAULT_FAR 25000.0f
 
 bool view_camera(view_cam_t *cam)
 {
@@ -45,6 +51,10 @@ bool view_camera(view_cam_t *cam)
   cam->up[2] = cam->right[0] * cam->forward[1] - cam->right[1] * cam->forward[0];
   cam->tan_y = tanf(fov / 2);
   cam->tan_x = cam->tan_y * aspect;
+  float near = *(const float *)(game_cam + CAM_NEAR), far = *(const float *)(game_cam + CAM_FAR);
+  bool sane = near > 0.001f && near < 10 && far > near * 10 && far < 1e7f;
+  cam->near = sane ? near : DEFAULT_NEAR;
+  cam->far = sane ? far : DEFAULT_FAR;
   return true;
 }
 
@@ -55,6 +65,15 @@ void view_point(const view_cam_t *cam, const float x[3], float v[3])
   v[0] = d[0] * cam->right[0] + d[1] * cam->right[1] + d[2] * cam->right[2];
   v[1] = d[0] * cam->up[0] + d[1] * cam->up[1] + d[2] * cam->up[2];
   v[2] = d[0] * cam->forward[0] + d[1] * cam->forward[1] + d[2] * cam->forward[2];
+}
+
+/* GL's perspective depth, as the game's projection makes it: f (1 - n / z) / (f - n) */
+float view_depth(const view_cam_t *cam, float ahead)
+{
+  if (ahead <= cam->near)
+    return 0;
+  float d = cam->far * (1 - cam->near / ahead) / (cam->far - cam->near);
+  return d > 1 ? 1 : d;
 }
 
 /* 0..1 across and down the picture */
