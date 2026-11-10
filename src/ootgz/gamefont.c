@@ -45,7 +45,19 @@ static void *tt_alloc(size_t n)
 }
 #define STBTT_ifloor(x) ((int)__builtin_floor(x))
 #define STBTT_iceil(x) ((int)__builtin_ceil(x))
-#define STBTT_sqrt(x) __builtin_sqrt(x)
+/* a square root by the CPU's own instruction: __builtin_sqrt falls back to sqrt (for errno), which the
+ * module doesn't import (as root() in nativeui.c) */
+static inline double tt_sqrt(double v)
+{
+#if defined(__aarch64__)
+  double r;
+  __asm__("fsqrt %d0, %d1" : "=w"(r) : "w"(v > 0 ? v : 0));
+  return r;
+#else
+  return __builtin_sqrt(v > 0 ? v : 0);
+#endif
+}
+#define STBTT_sqrt(x) tt_sqrt(x)
 #define STBTT_pow(x, y) __builtin_pow(x, y)   /* only in the SDF code, which isn't used */
 #define STBTT_fmod(x, y) __builtin_fmod(x, y) /* ... */
 #define STBTT_cos(x) __builtin_cos(x)         /* ... */
