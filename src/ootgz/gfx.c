@@ -38,7 +38,7 @@ volatile int gfx_menu_rows = GFX_ROWS;
 volatile int gfx_opacity = 60;
 volatile int gfx_menu_scale;
 volatile int gfx_style = GFX_STYLE_GAME;
-volatile int gfx_custom_x = -1, gfx_custom_y = -1;
+volatile int gfx_custom_x[GFX_PANELS] = { -1, -1, -1, -1 }, gfx_custom_y[GFX_PANELS] = { -1, -1, -1, -1 };
 volatile int gfx_pause_icon;
 volatile uint32_t gfx_presents;
 
@@ -242,9 +242,22 @@ void gfx_input_scale(int percent)
   input_panel.scale_pct = (uint8_t)percent;
 }
 
+/* where the input display goes (gfx_input_place): kept, as the panel is cleared every frame */
+static gfx_corner_t input_corner = GFX_BOTTOM_LEFT;
+static int16_t input_x, input_y;
+
+void gfx_input_place(gfx_corner_t corner, int x_permille, int y_permille)
+{
+  input_corner = corner;
+  input_x = (int16_t)x_permille;
+  input_y = (int16_t)y_permille;
+}
+
 void gfx_input(int col, int row, gfx_style_t style, const char *s)
 {
-  input_panel.corner = GFX_BOTTOM_LEFT;
+  input_panel.corner = input_corner;
+  input_panel.x = input_x;
+  input_panel.y = input_y;
   input_panel.yoff = 1; /* text in the middle of the panel (nvn.c TEXT_TOP) */
   if (row >= 0 && row < GFX_ROWS) {
     input_panel.alpha[row] = OPAQUE;
@@ -265,6 +278,15 @@ void gfx_hud_at(int x_permille, int y_permille)
 {
   hud_panel.x = (int16_t)x_permille;
   hud_panel.y = (int16_t)y_permille;
+}
+
+void gfx_hud_caption(gfx_corner_t corner, int row, const char *s)
+{
+  hud_panel.corner = corner;
+  hud_panel.yoff = 1;
+  if (row >= 0 && row < GFX_ROWS)
+    hud_panel.kind[row] = GFX_ROW_CAPTION;
+  put_text(&hud_panel, 0, row, GFX_TITLE, s);
 }
 
 void gfx_hud(gfx_corner_t corner, int row, gfx_style_t style, const char *s)

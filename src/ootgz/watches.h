@@ -13,6 +13,7 @@ typedef enum {
 
 extern const char *const watch_labels[W_COUNT];
 extern bool watches_shown;
+extern bool watches_header; /* a small "watches" header over them in the box */
 /* The watches on screen, in order (gz's watch list): the predefined ones, each at most once, and
  * memory watches (gz's: an address and a type), at most one per address. Memory watches aren't
  * saved: addresses change every time the game starts. */
@@ -59,7 +60,10 @@ void watch_set_type(watch_t w, int type);
 extern int watches_corner;         /* gfx_corner_t */
 extern int watches_x, watches_y;   /* GFX_CUSTOM: top-left, thousandths of the picture */
 extern bool watches_moving;        /* shown while the menu is open, to move them */
-extern bool input_display;         /* gz's input display at the bottom left */
+extern bool input_display;         /* gz's input display (bottom left unless moved) */
+extern int input_corner;           /* ... where: gfx_corner_t, as the watches */
+extern int input_x, input_y;       /* ... GFX_CUSTOM: top-left, thousandths of the picture */
+extern bool input_moving;          /* ... shown while the menu is open, to move it */
 extern bool input_display_bg;      /* ... on a background, as the watches */
 extern bool input_show_left, input_show_right, input_show_buttons; /* what it shows */
 extern int input_style;            /* 0 a row (gz's), 1 a controller (Switch 2 Pro Controller) */

@@ -1437,8 +1437,8 @@ static void place_panel(int p, const gfx_panel_t *panel, const frame_t *frame, i
           x = margin;
         if (y < margin)
           y = margin;
-        gfx_custom_x = x * 1000 / area.w;
-        gfx_custom_y = y * 1000 / area.h;
+        gfx_custom_x[p] = x * 1000 / area.w;
+        gfx_custom_y[p] = y * 1000 / area.h;
         break;
       default:
         break;
@@ -1678,7 +1678,7 @@ static void draw_overlay(nvn_queue_t *queue, nvn_window_t *window, int index)
       hud_bottom_left = y;
     if (p == GFX_PANEL_LOG && hud_bottom_right >= 0 && y + h > hud_bottom_right)
       y = hud_bottom_right - h;
-    if (p == GFX_PANEL_INPUT && hud_bottom_left >= 0 && y + h > hud_bottom_left)
+    if (p == GFX_PANEL_INPUT && panel->corner == GFX_BOTTOM_LEFT && hud_bottom_left >= 0 && y + h > hud_bottom_left)
       y = hud_bottom_left - h;
     if (y < frame.margin)
       y = frame.margin;

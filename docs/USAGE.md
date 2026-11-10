@@ -100,7 +100,7 @@ untick the checkbox on a watch to show or hide just that one.
 to add it. Or open **debug > memory**, find the value, edit the row (**L**) and press **L** on its address.
 
 **...move the watches box?**
-**watches > watches box > move**, then the D-pad (hold it to go faster). **L** when it's in place.
+**watches > watches box > move watches position**, then the D-pad (hold it to go faster). **L** when it's in place.
 
 **...see the invisible walls?**
 **scene > collision > show**. Cyan walls stop Link; red ones are walls he's inside.
@@ -114,7 +114,7 @@ held B commands descent through floors. Exit geometry before toggling floating o
 gravity resumes, with fall-distance protection through the first landing. Void triggers still apply.
 
 **...look at a trick frame by frame?**
-Frame advance is on from the start (**settings > frame advance > enabled**). In the game, tap **L** to pause, tap **L** for one frame or hold it
+Turn on frame advance with **settings > frame advance > enabled** (it's off to begin with). In the game, tap **L** to pause, tap **L** for one frame or hold it
 to play slowly, and press **L + L3** to carry on. Buttons and stick directions you press while paused are given to
 the next frame.
 
@@ -131,7 +131,7 @@ the next frame.
 | Top left, under the D-pad icon | The menu |
 | Any corner (you choose) | The watches box |
 | Bottom right | The log: what you just did, fading out after a second |
-| Bottom left | The input display (if it's on) |
+| Bottom left, or anywhere (you choose) | The input display (if it's on) |
 | Top left corner | The pause icon, while frame advance has the game paused |
 | Over the game | Air walls (if they're on) |
 
@@ -145,7 +145,8 @@ the SD card in `sloperinaGZ/settings.ini`, plain text you can edit. Your game sa
 
 - **Nothing happens when I press R + right stick down.** Check the sloperinaGZ splash showed at start-up. If not,
   sloperinaGZ needs the module and the IPS for the active game build. See [INSTALLATION.md](../INSTALLATION.md).
-- **The game doesn't react to a button.** Frame advance takes **L** (or **R**) away from the game while it's on,
+- **The game doesn't react to a button.** Frame advance takes **L** (or **R**) away from the game while it's on
+  (except in the game's pause screen, unless **settings > frame advance > in pause screen** is on),
   levitate takes **L3**, plus **X/B/R3** while floating. Turn them off in **settings** if you need those buttons.
 - **The screen froze.** Frame advance may have paused the game: press **L + L3** (or **R + L3**).
 - **Something I ticked didn't change in the game.** Some things only show after the game redraws them: open and

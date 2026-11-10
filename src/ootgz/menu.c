@@ -1,5 +1,6 @@
 #include "menu.h"
 
+#include "gameimage.h"
 #include "gfx.h"
 #include "input.h"
 #include "lang.h"
@@ -440,6 +441,7 @@ void menu_input(void)
 /* --- an item's line -------------------------------------------------------------------------- */
 
 static void item_line(menu_item_t *item, char *buf, int len);
+static bool picture_shown(const menu_item_t *item);
 
 void menu_item_line(menu_item_t *item, char *buf, int len)
 {
@@ -463,9 +465,8 @@ static void item_line(menu_item_t *item, char *buf, int len)
     if (choice >= 0 && choice < item->n_choices && item->choice_pictures[choice])
       picture = item->choice_pictures[choice];
   }
-  if (picture && gfx_style == GFX_STYLE_GAME) { /* the game's picture of the item before its label */
-    snprintf(pictured, sizeof(pictured), "%s%c%c %s", item->picture_pad ? "  " : "", GFX_PICTURE,
-             GFX_PICTURE_ID(picture), label);
+  if (picture && picture_shown(item)) { /* the game's picture of the item before its label */
+    snprintf(pictured, sizeof(pictured), "%c%c %s", GFX_PICTURE, GFX_PICTURE_ID(picture), label);
     label = pictured;
   }
   switch (item->kind) {
@@ -671,6 +672,47 @@ static const char *current_hint(const menu_t *menu)
   return hint;
 }
 
+/* In a run of items (the items between two headings or other lines of text, at one indent), the labels
+ * line up: each item starts as far in as the run's checkboxes and the game's pictures of items push the
+ * labels after them, less what's before its own label. Not "return", nor rows laid out by their own text
+ * (an icon first, gz's grid, no label). */
+#define BOX_CELLS 2     /* a checkbox: GFX_CHECK_* and GFX_WIDE_REST */
+#define PICTURE_CELLS 3 /* the game's picture of the item (two cells) and a space (item_line) */
+static bool lines_up(const menu_item_t *item)
+{
+  return item->kind != MI_TEXT && item->kind != MI_BACK && !item->icon && !item->grid && item->label &&
+         item->label[0];
+}
+
+/* the game's picture of the item is drawn before its label: the game's style, with the pictures there (not
+ * when loading them failed: no room left for nothing) */
+static bool picture_shown(const menu_item_t *item)
+{
+  return item->picture && gfx_style == GFX_STYLE_GAME && !gameimage_failed();
+}
+
+static int label_lead(const menu_item_t *item)
+{
+  return (item->kind == MI_CHECK ? BOX_CELLS : 0) + (picture_shown(item) ? PICTURE_CELLS : 0);
+}
+
+static int label_pad(const menu_t *menu, int index)
+{
+  const menu_item_t *item = &menu->items[index];
+  if (!lines_up(item))
+    return 0;
+  int most = label_lead(item);
+  for (int dir = -1; dir <= 1; dir += 2)
+    for (int i = index + dir; i >= 0 && i < menu->n_items; i += dir) {
+      const menu_item_t *other = &menu->items[i];
+      if (other->kind == MI_TEXT || other->indent != item->indent)
+        break;
+      if (lines_up(other) && label_lead(other) > most)
+        most = label_lead(other);
+    }
+  return most - label_lead(item);
+}
+
 /* the widest item line, from column 0 */
 static int items_width(menu_t *menu)
 {
@@ -678,7 +720,7 @@ static int items_width(menu_t *menu)
   int width = 0;
   for (int i = 0; i < menu->n_items; i++) {
     menu_item_line(&menu->items[i], line, sizeof(line));
-    width = max_int(width, ITEM_COL + menu->items[i].indent * MENU_INDENT + (int)strlen(line));
+    width = max_int(width, ITEM_COL + menu->items[i].indent * MENU_INDENT + label_pad(menu, i) + (int)strlen(line));
   }
   return width;
 }
@@ -757,7 +799,7 @@ static void draw_item(menu_t *menu, int index, int y)
   char line[LINE_BUF];
   menu_item_line(item, line, sizeof(line));
   bool selected = index == menu->selected;
-  int col = ITEM_COL + item->indent * MENU_INDENT;
+  int col = ITEM_COL + item->indent * MENU_INDENT + label_pad(menu, index);
   int cursor_start = 0;
   int cursor_len = 0;
   if (selected && item->cursor && item->cursor(item, line, &cursor_start, &cursor_len)) {

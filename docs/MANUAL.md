@@ -88,7 +88,7 @@ With the menu closed:
 | **age** | **child** or **adult**: what the next **reload map** gives you. |
 | **reload map** | Reloads the map you're in, at the age chosen above. Changing age loads the other age's version of the map and swaps sword and shield with the ones from the other age (adult-only tunics and boots come off a child). |
 
-| **save position (R + d-up)** | Remembers where Link is, which way he faces and the map (gz's save position). The first save in an area only finds Link's position in memory ("Locating Link's start position, please try again"; he's lifted a little while it's tested, as with levitate, and it's quicker while he's moving): press it again once it says it's found him. |
+| **save position (R + d-up)** | Remembers where Link is, which way he faces and the map (gz's save position). The first save in an area only finds Link's position in memory ("Locating Link's starting position, please try again"; he's lifted a little while it's tested, as with levitate, and it's quicker while he's moving): press it again once it says it's found him. |
 | **load position (R + d-down)** | Puts Link back there, facing the same way. Only in the same map. With nothing saved: "No position saved yet". |
 
 Under **return**: Link's **position** (x, y, z), his **current age** and the **map**.
@@ -171,7 +171,8 @@ gz's watch list: values shown on the screen in a box while you play.
 |---|---|
 | **show on screen** | Show the watches box (also **R + D-pad right** in the game). |
 | **watches box > position** | Top-left, top-right, bottom-left, bottom-right, top-centre, bottom-centre, or **custom**. |
-| **watches box > move** | Move the box anywhere: the D-pad glides it (hold to speed up), **L** leaves it there. It's shown while you move it. |
+| **watches box > header** | A small **watches** header over them, underlined (on to begin with). |
+| **watches box > move watches position** | Move the box anywhere: the D-pad glides it (hold to speed up), **L** leaves it there. It's shown while you move it, and so is the input display if it's on. |
 
 **watches**: your list, five at a time (the **↑ ↓** buttons above it scroll when there are more). Each watch is a
 row of buttons:
@@ -192,7 +193,9 @@ Under the list:
   **JS Height** is the height your last jump set (takeoff + 0.7; FLT_MAX until you jump after a load), which
   the jumpslash launch is limited to. It's always in the list (hide it to keep it off screen).
 - **+ (custom watch)**: a watch of any memory address. Type the address (D-pad left / right: digit, up / down:
-  change it), **L** to add. It starts from your last memory watch, as in gz. One watch per address.
+  change it), **L** to add. It starts from your last memory watch, as in gz. One watch per address. Changed your
+  mind? **B**, or D-pad left past the first digit to the **x** that takes the folder's place and **L**: no watch is
+  added.
 
 **Display types.** Positions and speeds: **f32** (decimal), **s32** (whole number), **x32** (the float's bits).
 Angles: **deg**, **hex** (the game's 16-bit angle, 0x4000 = 90°), **s16**, **rad**. Counters: **dec**, **hex**.
@@ -259,7 +262,7 @@ and log) and **background opacity** (0 to 100%, 60% at first; below 100% the gam
 
 #### 2.10.1 Input display
 
-gz's input display, at the bottom left (hidden while the menu is open).
+gz's input display, at the bottom left unless you move it (hidden while the menu is open).
 
 | Item | What it does |
 |---|---|
@@ -268,6 +271,8 @@ gz's input display, at the bottom left (hidden while the menu is open).
 | **left stick**, **right stick**, **buttons** | What it shows. |
 | **style** | **row**: gz's line of stick values and buttons. **controller**: a Switch 2 Pro Controller with the buttons lighting up, rings for the sticks and their values underneath. |
 | **size** | small, medium, large: half, three quarters or all of the menu's size. |
+| **position** | The corner it's in, or **custom** (where **move input display position** left it), as the watches box. |
+| **move input display position** | Move it anywhere: the D-pad glides it (hold to speed up), **L** leaves it there. It's shown while you move it, and so are the watches if they're on. |
 
 #### 2.10.2 Levitate
 
@@ -301,7 +306,8 @@ pause behavior have not been separately fixed.
 
 | Item | What it does |
 |---|---|
-| **enabled** | Turns frame advance on ([4](#4-about-frame-advance)). |
+| **enabled** | Turns frame advance on ([4](#4-about-frame-advance)). Off by default; updating from 0.0.3 or older turns it off once. |
+| **in pause screen** | Off (the default): while the game's pause screen or an item menu is open, the button is the game's and doesn't start frame advance. On: it starts frame advance there too. |
 | **pause icon** | gz's pause icon at the top left while paused. |
 | **button** | **L** or **R**. The game doesn't see that button while frame advance is on. |
 
@@ -319,7 +325,7 @@ second. It starts fresh each time the game starts. Send it along when you report
 
 ### 2.12 About
 
-The name, version, build date and description, and the website.
+The name and version, the build date ("Build Date: ..."), and the website.
 
 ## 3 On the screen
 
@@ -328,13 +334,14 @@ The name, version, build date and description, and the website.
 | Menu | Top left, under the D-pad icon | Always on top. |
 | Watches | The corner you choose, or anywhere | [2.8](#28-watches) |
 | Log | Bottom right | What you just did; stays a second, then fades. gz's grey text with a shadow. |
-| Input display | Bottom left | [2.10.1](#2101-input-display); moves above the watches if they're there too. |
+| Input display | Bottom left, or the corner you choose, or anywhere | [2.10.1](#2101-input-display); in the bottom left, it moves above the watches if they're there too. |
 | Pause icon | Top left | Two bars: paused by frame advance. |
 | Air walls | Over the game | [2.3.1](#231-collision) |
 
 ## 4 About frame advance
 
-With **settings > frame advance > enabled** on and the menu closed:
+With **settings > frame advance > enabled** on and the menu closed (and, unless **in pause screen** is on, the
+game's pause screen closed):
 
 - **Tap the button** (L or R): the game pauses (one more frame plays first, so the pause icon is on screen and
   you can see it hasn't crashed). Tap again: one frame. **Hold** it: after a moment, frames play

@@ -73,12 +73,11 @@ static const char *after_prefix(const char *text, const char *prefix)
   return *prefix ? NULL : text;
 }
 
-/* the about page's font line: the one the menu is drawn in */
-static void text_font(menu_item_t *it, char *buf, int len)
+/* the about page's build date, as the splash says it */
+static void text_build_date(menu_item_t *it, char *buf, int len)
 {
   (void)it;
-  snprintf(buf, len, "%s", gfx_style == GFX_STYLE_GAME ? T("font: the game's own, read from your copy of it")
-                                                      : T("font: Press Start 2P (codeman38, OFL)"));
+  snprintf(buf, len, TF("Build Date: %s"), BUILD_WHEN);
 }
 
 /* an empty read-only line */
@@ -593,9 +592,9 @@ static const struct { const char *label; const uint8_t *pictures; int n; } choic
 /* the items of an item menu: their pictures, by their labels (an option's by its choice, when it has a
  * table of them as long as its choices); in a menu with checkboxes, the others' two cells in, so all its
  * pictures are in a column after the checkboxes */
+/* the game's pictures of the menu's items (their labels line up round them: menu.c label_pad) */
 static void add_pictures(menu_t *m)
 {
-  bool checks = false;
   for (int i = 0; i < m->n_items; i++) {
     for (unsigned k = 0; k < ARRAY_LEN(item_pictures); k++) {
       if (m->items[i].label && same_text(m->items[i].label, item_pictures[k].label)) {
@@ -607,10 +606,7 @@ static void add_pictures(menu_t *m)
       if (m->items[i].picture && m->items[i].kind == MI_OPTION && m->items[i].n_choices == choice_pictures[k].n &&
           same_text(m->items[i].label, choice_pictures[k].label))
         m->items[i].choice_pictures = choice_pictures[k].pictures;
-    checks |= m->items[i].picture && m->items[i].kind == MI_CHECK;
   }
-  for (int i = 0; i < m->n_items; i++)
-    m->items[i].picture_pad = checks && m->items[i].picture && m->items[i].kind != MI_CHECK;
 }
 
 static void build_cheats(void)
@@ -1230,7 +1226,7 @@ static void add_small_keys(menu_t *menu, const char *dungeon)
     { "forest temple", "forest temple" }, { "fire temple", "fire temple" }, { "water temple", "water temple" },
     { "shadow temple", "shadow temple" }, { "spirit temple", "spirit temple" },
     { "bottom of the well", "bottom of well" }, { "gerudo training ground", "gerudo training" },
-    { "inside ganon castle", "ganon's castle" },
+    { "inside ganon's castle", "ganon's castle" },
   };
   for (int j = 0; j < ARRAY_LEN(key_names); j++) {
     if (!strings_equal(key_names[j].dungeon, dungeon))
@@ -1444,6 +1440,16 @@ static void set_shown(menu_item_t *it, bool on)
   watches_shown = on;
 }
 
+static bool get_header(menu_item_t *it)
+{
+  return watches_header;
+}
+
+static void set_header(menu_item_t *it, bool on)
+{
+  watches_header = on;
+}
+
 static int get_corner(menu_item_t *it)
 {
   return watches_corner;
@@ -1454,12 +1460,24 @@ static void set_corner(menu_item_t *it, int corner)
   watches_corner = corner;
 }
 
-/* move: the watches go to "custom" and the d-pad moves them, shown live; L leaves them there.
- * They glide while the d-pad is held (in thousandths of the picture per frame, faster the longer it's
- * held; a tap moves them one), rather than jumping on the d-pad's repeat. */
+/* move: the watches (or the input display) go to "custom" and the d-pad moves them, shown live; L leaves
+ * them there. They glide while the d-pad is held (in thousandths of the picture per frame, faster the longer
+ * it's held; a tap moves them one), rather than jumping on the d-pad's repeat. */
 #define WATCHES_POS_MAX 1000 /* positions are thousandths of the picture */
 #define WATCHES_ROUNDING 3   /* how far nvn.c's rounded copy of the position can drift from ours */
 static int move_held;        /* frames the d-pad has been held */
+
+/* what a move item moves (its it->data) */
+enum { MOVE_WATCHES, MOVE_INPUT };
+static const struct {
+  int *corner, *x, *y;
+  bool *moving; /* shown while the menu is open */
+  int panel;    /* its gfx panel, for where nvn.c really put it */
+  const char *done;
+} movers[] = {
+  [MOVE_WATCHES] = { &watches_corner, &watches_x, &watches_y, &watches_moving, GFX_PANEL_HUD, "watches moved" },
+  [MOVE_INPUT] = { &input_corner, &input_x, &input_y, &input_moving, GFX_PANEL_INPUT, "input display moved" },
+};
 
 /* how far the watches move this frame */
 static int glide_step(int frames_held)
@@ -1475,20 +1493,21 @@ static int glide_step(int frames_held)
   return 10;
 }
 
-static bool move_watches(menu_item_t *it)
+static bool move_panel(menu_item_t *it)
 {
-  watches_moving = true;
-  /* nvn.c keeps them whole on screen: follow that only when it really pushed them back (its value
-   * is rounded, so taking it every frame made them creep) */
-  if (gfx_custom_x >= 0 &&
-      (gfx_custom_x - watches_x > WATCHES_ROUNDING || watches_x - gfx_custom_x > WATCHES_ROUNDING))
-    watches_x = gfx_custom_x;
-  if (gfx_custom_y >= 0 &&
-      (gfx_custom_y - watches_y > WATCHES_ROUNDING || watches_y - gfx_custom_y > WATCHES_ROUNDING))
-    watches_y = gfx_custom_y;
+  int *x = movers[it->data].x, *y = movers[it->data].y, panel = movers[it->data].panel;
+  *movers[it->data].moving = true;
+  /* nvn.c keeps it whole on screen: follow that only when it really pushed it back (its value is rounded,
+   * so taking it every frame made it creep) */
+  if (gfx_custom_x[panel] >= 0 &&
+      (gfx_custom_x[panel] - *x > WATCHES_ROUNDING || *x - gfx_custom_x[panel] > WATCHES_ROUNDING))
+    *x = gfx_custom_x[panel];
+  if (gfx_custom_y[panel] >= 0 &&
+      (gfx_custom_y[panel] - *y > WATCHES_ROUNDING || *y - gfx_custom_y[panel] > WATCHES_ROUNDING))
+    *y = gfx_custom_y[panel];
   if (input_pressed() & BTN_L) {
     move_held = 0;
-    gfx_logf("watches moved");
+    gfx_logf("%s", movers[it->data].done);
     return false;
   }
   uint32_t held = input_held();
@@ -1496,25 +1515,24 @@ static bool move_watches(menu_item_t *it)
   int dy = !!(held & BTN_DDOWN) - !!(held & BTN_DUP);
   move_held = dx || dy ? move_held + 1 : 0;
   int step = glide_step(move_held);
-  watches_x += dx * step;
-  watches_y += dy * step;
-  watches_x = clamp_int(watches_x, 0, WATCHES_POS_MAX);
-  watches_y = clamp_int(watches_y, 0, WATCHES_POS_MAX);
+  *x = clamp_int(*x + dx * step, 0, WATCHES_POS_MAX);
+  *y = clamp_int(*y + dy * step, 0, WATCHES_POS_MAX);
   return true;
 }
 
-static void act_move_watches(menu_item_t *it)
+static void act_move_panel(menu_item_t *it)
 {
-  if (watches_corner != GFX_CUSTOM) { /* start near the corner they're in */
+  int *corner = movers[it->data].corner;
+  if (*corner != GFX_CUSTOM) { /* start near the corner it's in */
     static const int16_t corner_start[GFX_NPLACES][2] = {
       { 0, 0 }, { 1000, 0 }, { 0, 1000 }, { 1000, 1000 }, { 400, 0 }, { 400, 1000 }, { 0, 0 },
     };
-    watches_x = corner_start[watches_corner][0];
-    watches_y = corner_start[watches_corner][1];
-    watches_corner = GFX_CUSTOM;
-    gfx_custom_x = -1;
+    *movers[it->data].x = corner_start[*corner][0];
+    *movers[it->data].y = corner_start[*corner][1];
+    *corner = GFX_CUSTOM;
+    gfx_custom_x[movers[it->data].panel] = -1;
   }
-  watches_moving = true;
+  *movers[it->data].moving = true;
   move_held = 0;
   menu_edit(it);
 }
@@ -1783,11 +1801,13 @@ static void act_watch_add(menu_item_t *it)
  * from the last memory watch's address and type (as gz does), else main's start as a word. */
 #define CUSTOM_DIGITS 10
 static uintptr_t custom_addr;
-static int custom_digit; /* the digit being changed, 0 = the leftmost */
+static int custom_digit; /* the digit being changed, 0 = the leftmost; CUSTOM_CANCEL: on the x */
+#define CUSTOM_CANCEL (-1)
 static int custom_type = MW_X32;
 
 /* The row under the list, gz's buttons with no names (the hint says what they are): the folder
- * (known watches) and the + (custom watch). While typing an address it follows the +. */
+ * (known watches) and the + (custom watch). While typing an address it follows the +, and the folder's
+ * place is an x (in the rows' x column) that gives up the watch. */
 enum { TOOL_KNOWN, TOOL_CUSTOM };
 #define COL_TOOL_CUSTOM 3  /* the +, after the folder (two cells) and a space */
 #define COL_TOOL_DIGITS 6  /* the address, after "F+ +  " */
@@ -1797,7 +1817,7 @@ static const char *const tool_hints[] = { "known watches: the built-in ones (L: 
 static void tools_text(menu_item_t *it, char *buf, int len)
 {
   if (menu_editing == it)
-    snprintf(buf, len, "%c%c %c  %0*lx  %s", GFX_ICON_FOLDER, GFX_WIDE_REST, GFX_ICON_ADD, CUSTOM_DIGITS,
+    snprintf(buf, len, "%c  %c  %0*lx  %s", GFX_ICON_REMOVE, GFX_ICON_ADD, CUSTOM_DIGITS,
              (unsigned long)custom_addr, memory_type_names[custom_type]);
   else
     snprintf(buf, len, "%c%c %c", GFX_ICON_FOLDER, GFX_WIDE_REST, GFX_ICON_ADD);
@@ -1806,7 +1826,7 @@ static void tools_text(menu_item_t *it, char *buf, int len)
 static bool tools_cursor(menu_item_t *it, const char *line, int *start, int *len)
 {
   if (menu_editing == it) {
-    *start = COL_TOOL_DIGITS + custom_digit;
+    *start = custom_digit == CUSTOM_CANCEL ? 0 : COL_TOOL_DIGITS + custom_digit;
     *len = 1;
   } else if (it->part == TOOL_KNOWN) {
     *start = 0;
@@ -1818,13 +1838,22 @@ static bool tools_cursor(menu_item_t *it, const char *line, int *start, int *len
   return true;
 }
 
-/* typing the address: d-left/right picks a digit, d-up/down changes it, L adds the watch */
+/* typing the address: d-left/right picks a digit (left of the first, the x), d-up/down changes it, L adds
+ * the watch (on the x: gives it up, as B does) */
+static const char *const custom_hint = "d-left/right: digit   d-up/down: change   L: add   B: cancel";
+static const char *const cancel_hint = "L: cancel, no watch added";
+
 static bool custom_watch_edit(menu_item_t *it)
 {
   if (input_repeat(BTN_DLEFT)) {
-    custom_digit = custom_digit > 0 ? custom_digit - 1 : 0;
+    custom_digit = custom_digit > CUSTOM_CANCEL ? custom_digit - 1 : CUSTOM_CANCEL;
   } else if (input_repeat(BTN_DRIGHT)) {
     custom_digit = custom_digit < CUSTOM_DIGITS - 1 ? custom_digit + 1 : CUSTOM_DIGITS - 1;
+  } else if (custom_digit == CUSTOM_CANCEL && (input_pressed() & BTN_L)) {
+    gfx_logf("custom watch cancelled");
+    return false;
+  } else if (custom_digit == CUSTOM_CANCEL) {
+    /* on the x: nothing to change */
   } else if (input_repeat(BTN_DUP) || input_repeat(BTN_DDOWN)) {
     int shift = (CUSTOM_DIGITS - 1 - custom_digit) * 4;
     int dir = input_repeat(BTN_DUP) ? 1 : -1;
@@ -1838,6 +1867,7 @@ static bool custom_watch_edit(menu_item_t *it)
       gfx_notice("that address is already watched");
     return false;
   }
+  it->edit_hint = custom_digit == CUSTOM_CANCEL ? cancel_hint : custom_hint;
   return true;
 }
 
@@ -1852,6 +1882,7 @@ static void act_custom_watch(menu_item_t *it)
       break;
     }
   custom_digit = CUSTOM_DIGITS - 1;
+  it->edit_hint = custom_hint;
   menu_edit(it);
 }
 
@@ -1869,10 +1900,15 @@ static void add_watches_box_items(void)
 {
   menu_add_check(&m_watches, "show on screen", get_shown, set_shown, 0);
   menu_add_heading(&m_watches, "watches box");
+  menu_item_t *header = menu_add_check(&m_watches, "header", get_header, set_header, 0);
+  if (header) {
+    header->hint = "a small \"watches\" header over them, underlined";
+    header->log_label = "watches header";
+  }
   menu_add_option(&m_watches, "position", GFX_NPLACES, watches_corner_names, get_corner, set_corner, 0);
-  menu_item_t *move = menu_add_action(&m_watches, "move", act_move_watches, 0);
+  menu_item_t *move = menu_add_action(&m_watches, "move watches position", act_move_panel, MOVE_WATCHES);
   if (move) {
-    move->edit = move_watches;
+    move->edit = move_panel;
     move->edit_alone = true;
     move->hint = "L: move the watches around the screen";
     move->edit_hint = "watches: d-pad moves them   L: done";
@@ -1901,6 +1937,9 @@ static void add_watch_rows(void)
       continue;
     int parts[MAX_ROW_PARTS];
     row->text = watch_row;
+    /* on gz's grid: right-aligned, its "< type > value" moved with every change in the live value's width
+     * and the type's when the cursor made it bold */
+    row->grid = true;
     row->icon = GFX_ICON_REMOVE;
     row->cursor = watch_cursor;
     row->press = watch_press;
@@ -1922,7 +1961,7 @@ static void add_watch_tools(bool reselect, int part)
   tools->n_parts = 2;
   tools->part_hints = tool_hints;
   tools->edit = custom_watch_edit;
-  tools->edit_hint = "d-left/right: digit   d-up/down: change   L: add";
+  tools->edit_hint = custom_hint;
   if (reselect) {
     m_watches.selected = (int)(tools - m_watches.items);
     tools->part = part;
@@ -2181,6 +2220,16 @@ static void set_input_style(menu_item_t *it, int style)
   input_style = style;
 }
 
+static int get_input_corner(menu_item_t *it)
+{
+  return input_corner;
+}
+
+static void set_input_corner(menu_item_t *it, int corner)
+{
+  input_corner = corner;
+}
+
 static int get_input_size(menu_item_t *it)
 {
   return input_size;
@@ -2291,6 +2340,16 @@ static void set_fa(menu_item_t *it, bool on)
   frame_advance = on;
 }
 
+static bool get_fa_in_pause(menu_item_t *it)
+{
+  return frame_advance_in_pause;
+}
+
+static void set_fa_in_pause(menu_item_t *it, bool on)
+{
+  frame_advance_in_pause = on;
+}
+
 static bool get_pause_display(menu_item_t *it)
 {
   return pause_display;
@@ -2313,12 +2372,17 @@ static void set_fa_button(menu_item_t *it, int button)
 
 static void build_frame_advance(void)
 {
-  menu_init(&m_frame_advance, "frame advance", 5);
+  menu_init(&m_frame_advance, "frame advance", 6);
   menu_add_heading(&m_frame_advance, "frame advance options");
   menu_item_t *enabled = menu_add_check(&m_frame_advance, "enabled", get_fa, set_fa, 0);
   if (enabled) {
     enabled->hint = "in game, tap the button: pause; tap: a frame; button + L3: run";
     enabled->log_label = "frame advance";
+  }
+  menu_item_t *in_pause = menu_add_check(&m_frame_advance, "in pause screen", get_fa_in_pause, set_fa_in_pause, 0);
+  if (in_pause) {
+    in_pause->hint = "lets the button start frame advance in the game's pause screen (off: the game gets it)";
+    in_pause->log_label = "frame advance in pause screen";
   }
   menu_item_t *pause_icon = menu_add_check(&m_frame_advance, "pause icon", get_pause_display, set_pause_display, 0);
   if (pause_icon)
@@ -2335,11 +2399,11 @@ static void build_frame_advance(void)
 
 static void build_input_display(void)
 {
-  menu_init(&m_input_display, "input display", 10);
+  menu_init(&m_input_display, "input display", 12);
   menu_add_heading(&m_input_display, "display options");
   menu_item_t *show = menu_add_check(&m_input_display, "show", get_input_display, set_input_display, 0);
   if (show) {
-    show->hint = "the sticks and the buttons held, at the bottom left (hidden while the menu is open)";
+    show->hint = "the sticks and the buttons held (hidden while the menu is open)";
     show->log_label = "input display";
   }
   menu_item_t *background = menu_add_check(&m_input_display, "background", get_input_bg, set_input_bg, 0);
@@ -2359,6 +2423,17 @@ static void build_input_display(void)
   if (size) {
     size->hint = "small, medium, large: half, three quarters or all of the menu's text size";
     size->log_label = "input display size";
+  }
+  menu_item_t *position = menu_add_option(&m_input_display, "position", GFX_NPLACES, watches_corner_names,
+                                          get_input_corner, set_input_corner, 0);
+  if (position)
+    position->log_label = "input display position";
+  menu_item_t *move = menu_add_action(&m_input_display, "move input display position", act_move_panel, MOVE_INPUT);
+  if (move) {
+    move->edit = move_panel;
+    move->edit_alone = true;
+    move->hint = "L: move the input display around the screen";
+    move->edit_hint = "input display: d-pad moves it   L: done";
   }
   menu_end_group(&m_input_display);
   menu_add_return(&m_input_display);
@@ -2831,17 +2906,14 @@ void menus_splash(void)
   gfx_splash(lines, styles, indents, ARRAY_LEN(lines), SPLASH_FRAMES);
 }
 
-/* the about page: the name, version, build date and description, then the website */
+/* the about page: the name, version and build date, then the website */
 static void build_about(void)
 {
   menu_init(&m_about, "about", 10);
   static char title[64];
   snprintf(title, sizeof(title), "sloperinaGZ - %s", BUILD_VERSION);
   menu_add_heading(&m_about, title);
-  menu_add_text(&m_about, text_static, (intptr_t)BUILD_WHEN);
-  menu_add_text(&m_about, text_static, (intptr_t) "gz-style practice menu, loaded by the game");
-  menu_add_text(&m_about, text_font, 0);
-  menu_add_text(&m_about, text_static, (intptr_t) "based on the work of OoT N64's Practice ROM by glankk");
+  menu_add_text(&m_about, text_build_date, 0);
   menu_end_group(&m_about);
   add_blank_line(&m_about);
   menu_add_text(&m_about, text_static, (intptr_t) "practicerom.com/oothd");

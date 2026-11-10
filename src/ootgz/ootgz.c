@@ -64,8 +64,13 @@ static uint32_t frames_run;
  * button while it's on.
  * As in gz, everything else can be held or pressed meanwhile (the stick, A, Z...): the frame let
  * through reads the controller as it is, plus what was buffered while paused. Only R's shortcuts
- * (R + right stick down, R + d-pad...) don't count as a tap, so they don't pause the game; L has none. */
-bool frame_advance = true;
+ * (R + right stick down, R + d-pad...) don't count as a tap, so they don't pause the game; L has none.
+ * While the game's own pause is on (its pause screen or an item menu), the button is left to the game
+ * and can't start frame advance, unless "in pause screen" is ticked (frame_advance_in_pause; off by
+ * default). Once paused by frame advance, stepping into the pause screen still works as before.
+ * Off until it's ticked (settings_load turns it off once in files from before settings_version 1). */
+bool frame_advance = false;
+bool frame_advance_in_pause = false;
 bool pause_display = true;
 int frame_advance_button; /* 0 L, 1 R */
 
@@ -297,6 +302,14 @@ static void fa_frame(void)
     fa_button_down = false;
     gfx_pause_icon = 0;
     input_force_active = false;
+    return;
+  }
+  if (!fa_paused && !frame_advance_in_pause && gd_game_paused(0, 0)) {
+    /* The game's pause screen has the button (as when the menu is open): it isn't frame advance's
+     * until the pause screen has closed and the button has been let go. */
+    fa_button_down = false;
+    fa_blocked_after_menu = true;
+    fa_menu_closed_at = sys_tick();
     return;
   }
   input_hide_from_game |= fa_button_bit();

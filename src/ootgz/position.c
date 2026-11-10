@@ -3,7 +3,7 @@
  * Saving reads Link's drawn position, his facing and the map. Moving him back goes through his
  * physics record (levitate.c), which has to be found first in each area: a heap scan that test-lifts
  * the matches, a second or two. The first save (or load) in an area starts that search and says so
- * ("Locating Link's start position"), rather than acting later out of the blue; the next press works.
+ * ("Locating Link's starting position"), rather than acting later out of the blue; the next press works.
  * Saving needs the record so that the load after it is instant.
  *
  * A load waits until R and the d-pad of the shortcut are let go: holding R brings up the game's item
@@ -62,7 +62,7 @@ static bool need_record(void)
     return false;
   link_record_request();
   finding = true;
-  gfx_notice("Locating Link's start position, please try again");
+  gfx_notice("Locating Link's starting position, please try again");
   return true;
 }
 

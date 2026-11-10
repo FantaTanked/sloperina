@@ -546,7 +546,10 @@ static const struct { float height, text; } row_fp[GFX_ROW_KINDS] = {
   [GFX_ROW_WATCH] = { 11, 9 },
   [GFX_ROW_BUTTONS] = { 12, 9 },
   [GFX_ROW_SKIP] = { 0, 0 },
+  [GFX_ROW_CAPTION] = { 12, 7.5f }, /* smaller than the watches under it; its line in the room below the text */
 };
+#define CAPTION_TEXT_AT 0.38f /* of the space a caption's row has over its text: above it (the rest: its line) */
+#define CAPTION_LINE_UP 2.5f  /* its line: this many font pixels up from the row's foot */
 #define MENU_PAD_FP 9       /* the menu's padding above the title and below the controls */
 #define LIST_PAD_FP 5       /* the other panels' (the watches, the input display) */
 #define BOX_PAD_X 14        /* the menu's box: from its sides to what's in it (the title, the selection's end) */
@@ -1394,10 +1397,10 @@ static float menu_cells(const mrow_t *r, int from, bool draw)
 static void row_metrics(mrow_t *r)
 {
   int text_h = (int)(row_fp[r->kind].text * fp_px + 0.5f);
-  gf_face_t face = r->kind == GFX_ROW_TITLE ? GF_BOLD : GF_REGULAR;
+  gf_face_t face = r->kind == GFX_ROW_TITLE || r->kind == GFX_ROW_CAPTION ? GF_BOLD : GF_REGULAR;
   r->em = gamefont_em_for_height(face, text_h);
   float cap = cap_height(face, r->em);
-  float above = (r->h - cap) * (r->kind == GFX_ROW_HEADING ? HEADING_DROP : 0.5f);
+  float above = (r->h - cap) * (r->kind == GFX_ROW_HEADING ? HEADING_DROP : r->kind == GFX_ROW_CAPTION ? CAPTION_TEXT_AT : 0.5f);
   r->baseline = (int)(above + cap + 0.5f);
 }
 
@@ -1612,13 +1615,17 @@ static void menu_row(mrow_t *r)
 
   /* the selection: across the row when the whole item is selected, else under its selected part; the
    * game's own options cursor (a soft bar and its glow) once its pictures are there */
+  if (first_sel >= 0) {
+    /* where the selected part is drawn, which needn't be its cells: an icon after a right-aligned value (a
+     * watch's sorting arrows) follows the value */
+    sel_lo = 1e9f, sel_hi = -1e9f;
+    menu_cells(r, 0, false);
+    if (sel_hi < sel_lo)
+      sel_lo = col_x(r, first_sel), sel_hi = col_x(r, last_sel + 1);
+  }
   if (first_sel >= 0 && gpuui_image_ready(GAMEIMAGE_CURSOR_GLOW) && gpuui_image_ready(GAMEIMAGE_CURSOR_LINE)) {
     /* the game's cursor: a white frame round the item (or the part of it selected), its glow outside */
     bool whole = first_sel == first_text && last_sel == last_text;
-    sel_lo = 1e9f, sel_hi = -1e9f;
-    menu_cells(r, 0, false); /* where the selected part is drawn */
-    if (sel_hi < sel_lo)
-      sel_lo = col_x(r, first_sel), sel_hi = col_x(r, last_sel + 1);
     /* the line's middle runs on the row's edges, and round what's selected (across to the row's end when it's
      * the whole item) with the same room left and right as the row leaves above and below its capitals inside
      * the line, as the game's cursor sits round a control; (x0, y0)-(x1, y1) is its outer edge */
@@ -1630,8 +1637,8 @@ static void menu_row(mrow_t *r)
     cursor_at(x0, gpu_y, x1, gpu_y + r->h, whole);
   } else if (first_sel >= 0) {
     bool whole = first_sel == first_text && last_sel == last_text;
-    float from = whole ? (float)cell_x(1, r->scale) - 6 * fp_px : col_x(r, first_sel) - 3 * fp_px;
-    float to = whole ? r->right + 10 * fp_px : col_x(r, last_sel + 1) + 3 * fp_px;
+    float from = whole ? (float)cell_x(1, r->scale) - 6 * fp_px : sel_lo - 3 * fp_px;
+    float to = whole ? r->right + 10 * fp_px : sel_hi + 3 * fp_px;
     float y = gpu_y, h = r->h, line = fp_px * 0.5f < 1 ? 1 : (float)(int)(fp_px * 0.5f + 0.5f);
     faded_strip(gpu_x + from, gpu_x + to, y, h, whole ? 0.08f : 0.25f, whole ? 0.4f : 0.25f, band_light, 0.16f);
     faded_strip(gpu_x + from, gpu_x + to, y, line, whole ? 0.08f : 0.25f, whole ? 0.4f : 0.25f, band_light, 0.45f);
@@ -1756,9 +1763,13 @@ static void find_crumbs(mrow_t *r)
 }
 
 /* the menu's value column (the switches right-aligned at it, after the longest label with a gap; 0 when
- * there are none) and the right end of everything in it, from the grid's left edge */
+ * there are none) and the right end of everything in it, from the grid's left edge. Every row is measured
+ * as the cursor's bold sets it, wherever the cursor is, so the column and the menu's width stay put as it
+ * moves (measured as drawn, they followed whichever row was bold). */
 static void menu_layout(const gfx_panel_t *panel, int cols, int scale, float *value_right, float *content)
 {
+  int force = style_force;
+  style_force = GFX_SELECTED;
   mrow_t r = { .panel = panel, .cols = cols, .scale = scale };
   find_crumbs(&r);
   int rows = panel->rows < GFX_ROWS ? panel->rows : GFX_ROWS;
@@ -1787,6 +1798,7 @@ static void menu_layout(const gfx_panel_t *panel, int cols, int scale, float *va
     float end = menu_cells(&r, 0, false) + (r.opens_at >= 0 ? r.em * 1.4f : 0); /* room for its chevron */
     ends = end > ends ? end : ends;
   }
+  style_force = force;
   *value_right = values > 0 ? labels + gap + values : 0;
   *content = ends > *value_right ? ends : *value_right;
 }
@@ -1930,6 +1942,17 @@ bool nativeui_gpu_size(const gfx_panel_t *panel, int rows, int scale, int *w, in
     watch_widths(panel, cols, scale, &labels, &gap, &values);
     if (values > 0)
       *w = (int)(labels + gap + values + CELL_W * fp_px + 0.999f);
+    /* ... and at least as wide as their caption */
+    mrow_t r = { .panel = panel, .cols = cols, .scale = scale };
+    for (int row = 0; row < rows && row < GFX_ROWS; row++) {
+      r.row = row;
+      r.kind = kind_of(panel, row);
+      r.h = row_height_fp(panel, row) * fp_px;
+      if (r.kind != GFX_ROW_CAPTION || !row_setup(&r))
+        continue;
+      int need = (int)(menu_cells(&r, 0, false) + CELL_W * fp_px + 0.999f);
+      *w = need > *w ? need : *w;
+    }
   }
   rows = rows < GFX_ROWS ? rows : GFX_ROWS;
   *h = (int)((menu_height_fp(panel, rows) + e.t + e.b) * fp_px + 0.999f);
@@ -2417,6 +2440,11 @@ static void draw_list(const gfx_panel_t *panel, float x, float y, float w, float
       hint_line++;
     } else if (r.kind != GFX_ROW_GAP && r.kind != GFX_ROW_SKIP && gpu_fade > 0) {
       menu_row(&r);
+      if (r.kind == GFX_ROW_CAPTION) { /* its line under it, across the panel, fading out at its end */
+        float line = fp_px * 0.5f < 1 ? 1 : (float)(int)(fp_px * 0.5f + 0.5f);
+        faded_strip(gpu_x + cell_x(0, scale), gpu_x + r.right, gpu_y + r.h - CAPTION_LINE_UP * fp_px, line, 0,
+                    0.35f, styles[GFX_TITLE].colour, 0.55f);
+      }
     }
     prev = r.kind;
     top += r.h;

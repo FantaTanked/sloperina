@@ -2,10 +2,12 @@
  * text, one "key=value" per line, so it can be edited by hand, for example:
  *
  *   language=<code> (lang/<code>.json; en: English)   watch_label_<watch_t>=<name> (a renamed watch)
- *   cheats=<bit per cheat_t>   watches_shown=0|1   watch_position=<gfx_corner_t>
+ *   cheats=<bit per cheat_t>   watches_shown=0|1   watches_header=0|1   watch_position=<gfx_corner_t>
  *   watch_list=<watch_t>:<display type>:<hidden>,...
  *   opacity=0..100             arrival_cutscenes=0|1      levitate=0|1      levitate_speed=<units/s>
  *   menu_style=0|1 (0: the game's type, 1: gz's pixel font)
+ *   input_display_position=<gfx_corner_t>   input_display_x=, input_display_y= (custom: thousandths)
+ *   settings_version=<n> (SETTINGS_VERSION when saved: what settings_load has updated the file for)
  *
  * (save_settings_file writes every key; parse_line reads them.)
  *
@@ -37,10 +39,13 @@
 #define SAVE_GAP_FRAMES (2 * GAME_FPS) /* between settings writes */
 #define SETTINGS_TEXT_MAX 2048 /* the settings file's size limit, both ways */
 #define LOG_CHUNK 8192         /* the most log text written at once */
+/* Raised when an update changes what an existing file should mean; settings_load updates older files:
+ *   1: frame advance is off by default: off once in files from before (they all saved it on) */
+#define SETTINGS_VERSION 1
 
 /* the ranges a loaded value must be in to be used (otherwise the current setting stays) */
 #define WATCH_TYPE_MAX     15   /* a watch's display type; out of range: 0 */
-#define WATCH_POS_MAX      1000 /* watch_x, watch_y: thousandths of the picture */
+#define WATCH_POS_MAX      1000 /* watch_x, watch_y (and the input display's): thousandths of the picture */
 #define INPUT_SIZE_COUNT   3    /* small, medium, large */
 #define MENU_SCALE_MAX     3
 #define OPACITY_MAX        100  /* percent, kept in steps of 10 */
@@ -63,7 +68,9 @@ typedef struct {
   uint8_t watch_hidden[W_COUNT];
   char watch_labels[W_COUNT][WATCH_LABEL_MAX + 1]; /* by watch_t; "" = its own name */
   char lang[8];
+  int32_t settings_version;
   int32_t frame_advance;
+  int32_t frame_advance_in_pause;
   int32_t pause_display;
   int32_t frame_advance_button;
   int32_t menu_scale;
@@ -72,7 +79,10 @@ typedef struct {
   int32_t input_parts; /* INPUT_PART_* */
   int32_t input_style;
   int32_t input_size;
+  int32_t input_position; /* input_corner (gfx_corner_t) */
+  int32_t input_x, input_y;
   int32_t watches_shown;
+  int32_t watches_header;
   int32_t watch_position;
   int32_t watch_x;
   int32_t watch_y;
@@ -121,12 +131,15 @@ static snapshot_t take_snapshot(void)
   }
   memcpy(s.watch_types, watch_types, sizeof(s.watch_types));
   s.watches_shown = watches_shown;
+  s.watches_header = watches_header;
   s.watch_position = watches_corner;
   s.watch_x = watches_x;
   s.watch_y = watches_y;
   s.opacity = gfx_opacity;
   s.menu_scale = gfx_menu_scale;
+  s.settings_version = SETTINGS_VERSION;
   s.frame_advance = frame_advance;
+  s.frame_advance_in_pause = frame_advance_in_pause;
   s.pause_display = pause_display;
   s.frame_advance_button = frame_advance_button;
   snprintf(s.lang, sizeof(s.lang), "%s", lang_code());
@@ -134,6 +147,9 @@ static snapshot_t take_snapshot(void)
   s.input_display_bg = input_display_bg;
   s.input_style = input_style;
   s.input_size = input_size;
+  s.input_position = input_corner;
+  s.input_x = input_x;
+  s.input_y = input_y;
   s.input_parts = input_show_left | input_show_right << 1 | input_show_buttons << 2;
   s.arrival_cutscenes = warp_arrival_cutscenes;
   s.levitate = levitate_enabled;
@@ -173,6 +189,7 @@ static void apply_snapshot(const snapshot_t *s)
   for (int w = 0; w < W_COUNT; w++)
     watch_set_type((watch_t)w, s->watch_types[w]);
   watches_shown = s->watches_shown != 0;
+  watches_header = s->watches_header != 0;
   if (s->watch_position >= 0 && s->watch_position < GFX_NPLACES)
     watches_corner = s->watch_position;
   if (s->watch_x >= 0 && s->watch_x <= WATCH_POS_MAX && s->watch_y >= 0 && s->watch_y <= WATCH_POS_MAX) {
@@ -183,6 +200,7 @@ static void apply_snapshot(const snapshot_t *s)
   if (!same_text(s->lang, lang_code()))
     lang_select_code(s->lang);
   frame_advance = s->frame_advance != 0;
+  frame_advance_in_pause = s->frame_advance_in_pause != 0;
   pause_display = s->pause_display != 0;
   frame_advance_button = s->frame_advance_button == 1;
 
@@ -191,6 +209,12 @@ static void apply_snapshot(const snapshot_t *s)
   input_style = s->input_style == 1;
   if (s->input_size >= 0 && s->input_size < INPUT_SIZE_COUNT)
     input_size = s->input_size;
+  if (s->input_position >= 0 && s->input_position < GFX_NPLACES)
+    input_corner = s->input_position;
+  if (s->input_x >= 0 && s->input_x <= WATCH_POS_MAX && s->input_y >= 0 && s->input_y <= WATCH_POS_MAX) {
+    input_x = s->input_x;
+    input_y = s->input_y;
+  }
   input_show_left = s->input_parts & INPUT_PART_LEFT;
   input_show_right = s->input_parts >> 1 & 1;
   input_show_buttons = s->input_parts >> 2 & 1;
@@ -262,19 +286,25 @@ static bool key_is(const char *line, const char *key, const char **value)
 /* The keys whose value is a plain integer, and the snapshot field each one sets. */
 #define INT_KEY(key, field) { key, offsetof(snapshot_t, field) }
 static const struct { const char *key; size_t field_offset; } int_keys[] = {
+  INT_KEY("settings_version", settings_version),
   INT_KEY("watches_shown", watches_shown),
+  INT_KEY("watches_header", watches_header),
   INT_KEY("watch_position", watch_position),
   INT_KEY("watch_x", watch_x),
   INT_KEY("watch_y", watch_y),
   INT_KEY("opacity", opacity),
   INT_KEY("menu_size", menu_scale),
   INT_KEY("frame_advance", frame_advance),
+  INT_KEY("frame_advance_in_pause", frame_advance_in_pause),
   INT_KEY("pause_display", pause_display),
   INT_KEY("frame_advance_button", frame_advance_button),
   INT_KEY("input_display", input_display),
   INT_KEY("input_display_background", input_display_bg),
   INT_KEY("input_display_style", input_style),
   INT_KEY("input_display_size", input_size),
+  INT_KEY("input_display_position", input_position),
+  INT_KEY("input_display_x", input_x),
+  INT_KEY("input_display_y", input_y),
   INT_KEY("input_display_parts", input_parts),
   INT_KEY("arrival_cutscenes", arrival_cutscenes),
   INT_KEY("levitate", levitate),
@@ -407,6 +437,7 @@ void settings_load(void)
 
   snapshot_t s = take_snapshot(); /* defaults for anything the file lacks */
   s.menu_style = -1;               /* ... except the style: chosen below */
+  s.settings_version = 0;          /* ... and the version: a file without one is from before 1 */
   bool have_list = false;
   static char text[SETTINGS_TEXT_MAX];
   const char *from;
@@ -426,6 +457,10 @@ void settings_load(void)
   /* a file from before the game's style: the game's, as for everyone */
   if (s.menu_style < 0)
     s.menu_style = GFX_STYLE_GAME;
+  /* a file from before frame advance was off by default: off, once (saved below with the version) */
+  bool updated = got && s.settings_version < SETTINGS_VERSION;
+  if (got && s.settings_version < 1)
+    s.frame_advance = 0;
 
   apply_snapshot(&s);
   last_saved = take_snapshot();
@@ -433,8 +468,10 @@ void settings_load(void)
     log_printf("settings: loaded %s", from);
   else
     log_printf("settings: none yet (" SETTINGS_FILE ")");
-  if (old)
-    last_saved.cheats ^= 1; /* differs from now: written to the new folder at the next chance */
+  if (updated)
+    log_printf("settings: updated from version %d to %d", (int)s.settings_version, SETTINGS_VERSION);
+  if (old || updated)
+    last_saved.cheats ^= 1; /* differs from now: written (to the new folder) at the next chance */
 }
 
 /* --- writing the file ------------------------------------------------------------------------- */
@@ -455,22 +492,26 @@ static void save_settings_file(const snapshot_t *s)
   format_watch_list(s, list, sizeof(list));
   static char buf[SETTINGS_TEXT_MAX];
   int n = snprintf(buf, sizeof(buf),
-                   "cheats=%u\nwatch_list=%s\nwatches_shown=%d\nwatch_position=%d\nwatch_x=%d\nwatch_y=%d\nopacity=%d\n"
+                   "settings_version=%d\ncheats=%u\nwatch_list=%s\nwatches_shown=%d\nwatches_header=%d\nwatch_position=%d\nwatch_x=%d\nwatch_y=%d\nopacity=%d\n"
                    "arrival_cutscenes=%d\nlevitate=%d\nlevitate_speed=%d\nlevitate_move_speed=%d\n"
                    "levitate_through_walls=%d\nairwalls_shown=%d\nairwalls_all=%d\nenemy_health=%d\n",
-                   (unsigned)s->cheats, list, (int)s->watches_shown, (int)s->watch_position,
+                   (int)s->settings_version, (unsigned)s->cheats, list, (int)s->watches_shown, (int)s->watches_header,
+                   (int)s->watch_position,
                    (int)s->watch_x, (int)s->watch_y,
                    (int)s->opacity, (int)s->arrival_cutscenes, (int)s->levitate, (int)s->levitate_speed,
                    (int)s->levitate_move, (int)s->levitate_walls, (int)s->airwalls_shown, (int)s->airwalls_all,
                    (int)s->enemy_hp);
   if (n < (int)sizeof(buf))
     n += snprintf(buf + n, sizeof(buf) - n,
-                  "language=%s\nframe_advance=%d\nframe_advance_button=%d\npause_display=%d\nmenu_size=%d\n"
+                  "language=%s\nframe_advance=%d\nframe_advance_in_pause=%d\nframe_advance_button=%d\npause_display=%d\n"
+                  "menu_size=%d\n"
                   "input_display=%d\ninput_display_background=%d\ninput_display_parts=%d\n"
-                  "input_display_style=%d\ninput_display_size=%d\nmenu_style=%d\n",
-                  s->lang, (int)s->frame_advance, (int)s->frame_advance_button, (int)s->pause_display,
+                  "input_display_style=%d\ninput_display_size=%d\ninput_display_position=%d\n"
+                  "input_display_x=%d\ninput_display_y=%d\nmenu_style=%d\n",
+                  s->lang, (int)s->frame_advance, (int)s->frame_advance_in_pause, (int)s->frame_advance_button, (int)s->pause_display,
                   (int)s->menu_scale, (int)s->input_display, (int)s->input_display_bg, (int)s->input_parts,
-                  (int)s->input_style, (int)s->input_size, (int)s->menu_style);
+                  (int)s->input_style, (int)s->input_size, (int)s->input_position, (int)s->input_x,
+                  (int)s->input_y, (int)s->menu_style);
   for (int w = 0; w < W_COUNT && n < (int)sizeof(buf); w++)
     if (s->watch_labels[w][0])
       n += snprintf(buf + n, sizeof(buf) - n, WATCH_LABEL_KEY "%d=%s\n", w, s->watch_labels[w]);

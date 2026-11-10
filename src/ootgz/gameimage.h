@@ -44,4 +44,7 @@ void gameimage_icon_box(int slot, float box[4]);
  * all there, or it fails (logged once; the input display keeps its glyphs) */
 void gameimage_frame(void);
 
+/* true once loading them has failed: none of the pictures will come (the menu then leaves no room for them) */
+bool gameimage_failed(void);
+
 #endif

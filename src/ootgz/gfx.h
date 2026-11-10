@@ -16,8 +16,9 @@
 #define GFX_COLS 64
 #define GFX_ROWS 26
 #define GFX_PANELS 4
+#define GFX_PANEL_HUD 1   /* the watches */
 #define GFX_PANEL_LOG 2
-#define GFX_PANEL_INPUT 3 /* gz's input display: the stick and the buttons held, bottom-left, no background */
+#define GFX_PANEL_INPUT 3 /* gz's input display: the stick and the buttons held (bottom-left unless moved) */
 #define GFX_LOG_MAX 4 /* lines, as gz's SETTINGS_LOG_MAX */
 #define GFX_LOG_ROWS 6 /* the log panel's rows: the log, or the start-up splash */
 #define GFX_HINT_LEN 256
@@ -69,6 +70,7 @@ typedef enum {
   GFX_ROW_WATCH,   /* a watch: its label in GFX_WATCH_LABEL_W columns, a space, its value */
   GFX_ROW_BUTTONS, /* the input display's row: the buttons' names (and arrows) as the game's glyphs */
   GFX_ROW_SKIP,    /* a row the game's style leaves out (a hint's place in a menu without hints) */
+  GFX_ROW_CAPTION, /* a small header over a panel's rows (the watches box's), with a line under it */
   GFX_ROW_KINDS
 } gfx_row_kind_t;
 #define GFX_ROW_KIND 0x0F  /* the kind's bits */
@@ -137,6 +139,7 @@ extern volatile uint32_t gfx_log_count; /* lines logged so far */
 /* game thread: watches (panel 1), drawn this frame only */
 void gfx_hud(gfx_corner_t corner, int row, gfx_style_t style, const char *s);
 void gfx_hud_at(int x_permille, int y_permille); /* for GFX_CUSTOM */
+void gfx_hud_caption(gfx_corner_t corner, int row, const char *s); /* a small header over the watches */
 /* game thread: the input display (panel 3), drawn this frame only */
 void gfx_input(int col, int row, gfx_style_t style, const char *s);
 /* the controller drawing, this frame, of the controller in use (the game's style draws its picture of it) */
@@ -144,8 +147,9 @@ enum { GFX_PAD_PRO, GFX_PAD_JOYCONS, GFX_PAD_HANDHELD };
 void gfx_input_pad(const int8_t sticks[4], uint8_t clicks, int device);
 void gfx_input_background(bool on); /* the input display on a background, as the watches */
 void gfx_input_scale(int percent);  /* ... at this % of the menu's text size */
-/* set by nvn.c: where a GFX_CUSTOM panel was really put (kept whole on screen), thousandths */
-extern volatile int gfx_custom_x, gfx_custom_y;
+void gfx_input_place(gfx_corner_t corner, int x_permille, int y_permille); /* ... where (x, y: GFX_CUSTOM) */
+/* set by nvn.c: where each GFX_CUSTOM panel was really put (kept whole on screen), thousandths; -1 not yet */
+extern volatile int gfx_custom_x[GFX_PANELS], gfx_custom_y[GFX_PANELS];
 /* gz's pause display at the top left: 0 none, 1 paused (two bars), 2 advancing a frame (bar + play) */
 extern volatile int gfx_pause_icon;
 extern volatile uint32_t gfx_presents; /* frames the game has presented (nvn.c) */

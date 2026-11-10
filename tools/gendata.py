@@ -71,6 +71,9 @@ AMMO = [("deku sticks", "Deku sticks", "Deku Stick capacity", "Deku sticks"),
 SONGS = ["Zelda's Lullaby", "Epona's Song", "Saria's Song", "Sun's Song", "Song of Time", "Song of Storms",
          "Scarecrow's Song", "Minuet of Forest", "Bolero of Fire", "Serenade of Water", "Requiem of Spirit",
          "Nocturne of Shadow", "Prelude of Light"]
+# the spiritual stones as the menu names them (the save's titles have "Kokiri's", "Goron's", "Zora's")
+QUEST_ITEM_LABELS = {"Kokiri's Emerald": "kokiri emerald", "Goron's Ruby": "goron ruby",
+                     "Zora's Sapphire": "zora sapphire"}
 QUEST_ITEMS = ["Kokiri's Emerald", "Goron's Ruby", "Zora's Sapphire", "Forest Medallion", "Fire Medallion",
                "Water Medallion", "Spirit Medallion", "Shadow Medallion", "Light Medallion"]
 # (dungeon name in the save fields, label)
@@ -112,7 +115,20 @@ DUNGEONS = {"InsideTheDekuTree", "DodongoCavern", "InsideJabuJabuBelly", "Forest
             "GerudoTrainingGround", "InsideGanonCastle", "CrumblingGanonCastle"}
 # typos in the game's map and spawn names
 NAME_FIXES = {"hounted": "haunted", "musuem": "museum", "caslte": "castle", "wateland": "wasteland",
-              "caven": "cavern"}
+              "caven": "cavern", "grave yard": "graveyard", "ganon castle": "ganon's castle",
+              "link bed": "link's bed", "enemy museum": "hall of fallen foes"}  # after 'musuem' above
+# whole words: abbreviations spelled out, the game's 'Lear' (rear), and place names as the
+# game says them ('LostWood': lost woods, 'ZoraDomain': zora's domain)
+WORD_FIXES = {"pos": "position", "lear": "rear", "lost wood": "lost woods",
+              "zora domain": "zora's domain", "zora river": "zora's river", "zora fountain": "zora's fountain"}
+# spawns whose label no rule below gets right (by spawn name, in whichever map has it)
+SPAWN_LABELS = {"GanonCastleEntrance_FromInside": "from inside ganon's castle",
+                "Market_Entrance_FromCastle": "from ganon's castle",
+                "KakarikoWindmill_GraveYardSide": "windmill (from graveyard)",
+                "GraveYard_KakarikoWindmillSide": "from kakariko windmill",
+                "Graveyard_Adult/4": "in front of dampe"}
+# spawns left out of the menu: the same place as another ('<map>/<spawn>')
+HIDDEN_SPAWNS = {"Graveyard_Adult/5", "Graveyard_Adult/6"}  # as 4: in front of dampe
 # warp menu categories, indexed like data.h's WC_* enum
 CATEGORIES = ["overworld (child)", "overworld (adult)", "dungeons", "boss & battle rooms", "other"]
 WC_CHILD, WC_ADULT, WC_DUNGEON, WC_BOSS, WC_OTHER = range(len(CATEGORIES))
@@ -135,6 +151,9 @@ def pretty(name):
     words = re.sub(r"(?<=[a-z])(?=[A-Z0-9])|(?<=[A-Z])(?=[A-Z][a-z])", " ", words).lower()
     for typo, fixed in NAME_FIXES.items():
         words = words.replace(typo, fixed)
+    for word, fixed in WORD_FIXES.items():
+        words = re.sub(rf"\b{word}\b", fixed, words)
+    words = re.sub(r"\bstart position\b", "starting position", words)  # not 'restart position'
     if tags:
         return f"{words} ({' '.join(tags)})"
     return words
@@ -298,7 +317,8 @@ def write_quest_status(out):
     """Quest items, songs, dungeon items and keys, and the single flags and counters."""
     out.write("const flag_t data_quest_items[] = {")
     for title in QUEST_ITEMS:
-        out.write("  " + out.flag(label_of(title), [f"quests/Quest items/{title}", f"inventory/Items/{title}"]) + ",")
+        label = QUEST_ITEM_LABELS.get(title, label_of(title))
+        out.write("  " + out.flag(label, [f"quests/Quest items/{title}", f"inventory/Items/{title}"]) + ",")
     out.end_array("data_quest_items")
     out.write("const flag_t data_songs[] = {")
     for title in SONGS:
@@ -312,7 +332,8 @@ def write_quest_status(out):
     out.end_array("data_dungeons")
     out.write("const number_t data_small_keys[] = {")
     for dungeon in DUNGEON_KEYS:
-        out.write(f"  {{ {c_string(label_of(dungeon))}, {out.field_hash(f'{dungeon} small keys'):#010x} }},")
+        label = label_of(dungeon).replace("ganon castle", "ganon's castle")
+        out.write(f"  {{ {c_string(label)}, {out.field_hash(f'{dungeon} small keys'):#010x} }},")
     out.end_array("data_small_keys")
     out.write(f'const number_t data_skulltulas = {{ "skulltulas", {out.field_hash("Gold Skulltula tokens"):#010x} }};')
     out.write("const flag_t data_double_defense = " + out.flag("double defense", ["link/Abilities/Double defense"])
@@ -367,16 +388,63 @@ def write_story(out, story):
     return quests
 
 
-def spawn_label(position, source):
-    """A spawn's menu label: its name, plus what it needs or where it is entered from."""
-    label = pretty(position)
-    if position in GATED_SPAWNS:
-        return f"{label} [needs {GATED_SPAWNS[position]}]"
+def name_parts(name):
+    """The ways a place's name can be shortened in a spawn's name, without spaces: its whole name,
+    or its start or end ('death mountain crater' -> 'crater', 'kakariko village' -> 'kakariko')."""
+    words = name.split(" (")[0].split()
+    return ({"".join(words[i:]) for i in range(len(words))}
+            | {"".join(words[:i]) for i in range(1, len(words) + 1)})
+
+
+def without_map_name(label, map_name):
+    """A spawn's label without the words at its start that name its own map, which the breadcrumb
+    already shows: in death mountain crater 'crater goron city side' -> 'goron city side', in
+    kakariko village 'kakariko well side' -> 'well side' (spaces don't count). A label that is just
+    the map's name is its entrance."""
+    parts = name_parts(map_label(map_name))
+    words = label.split()
+    for n in range(len(words), 0, -1):
+        if "".join(words[:n]) in parts:
+            return " ".join(words[n:]) or "entrance"
+    return label
+
+
+def spawn_label(position, source, map_name):
+    """A spawn's menu label: where it is, in words that make sense under its map's breadcrumb, plus
+    where it's entered from and what it needs.
+
+    'goron city crater side' (from death mountain crater), in goron city -> 'from death mountain
+    crater'; 'start pos sage of fire' -> 'starting position (sage of fire)'; 'front of market' -> 'in
+    front of market'; 'ShadowNocturne' -> 'from playing nocturne of shadow'. A spawn whose name is just
+    a number is 'unnamed spawn <n>'."""
     origin = ""
     if source.startswith("from "):
         origin = pretty(source[len("from "):]).split(" (")[0]
-    if origin and origin != label:
+    fixed = SPAWN_LABELS.get(f"{map_name}/{position}", SPAWN_LABELS.get(position))
+    if fixed:
+        return fixed
+    # a warp song's pad ('ShadowNocturne'): by the song menu's name for the song
+    words = pretty(position).split()
+    song = len(words) == 2 and f"{words[1]} of {words[0]}"
+    if song in {label_of(title) for title in SONGS}:
+        return f"from playing {song}"
+    if position.isdigit():
+        label = f"unnamed spawn {position}"
+    else:
+        label = without_map_name(pretty(position), map_name)
+        label = re.sub(r"\bfront of\b", "in front of", label)
+        label = label.replace("sub event all boss battle", "boss rush").replace("sub event ", "")
+        # '<kind> position <story step or place>' -> '<kind> position (<...>)'
+        label = re.sub(r"^(starting position|restart position|entrance position) (?!\d)(.+)$", r"\1 (\2)", label)
+        # '<place> side': the way in from that place
+        side = re.fullmatch(r"(.+?) side\b(.*)", label)
+        if side and (not origin or "".join(side[1].split()) in name_parts(origin)):
+            label = f"from {origin or side[1]}{side[2]}"
+    if origin and origin != label and not re.match(rf"from {re.escape(origin)}\b", label) \
+            and f"(from {origin})" not in label:
         label = f"{label} (from {origin})"
+    if position in GATED_SPAWNS:
+        label = f"{label} [needs {GATED_SPAWNS[position]}]"
     return label
 
 
@@ -390,9 +458,11 @@ def write_warps(out, warps, starters):
         for name in names:
             first = len(spawns)
             for position, event, source in warps["spawns"][name]:
+                if f"{name}/{position}" in HIDDEN_SPAWNS:
+                    continue
                 # does the spawn have an event starter actor (tools/spawnstarters.py)?
                 has_starter = int(bool(starters.get(name, {}).get(position)))
-                spawns.append((spawn_label(position, source), position, event, has_starter))
+                spawns.append((spawn_label(position, source, name), position, event, has_starter))
             maps.append((name, map_label(name), map_category, int(name in DUNGEONS), first, len(spawns) - first))
     out.write("const warp_map_t data_warp_maps[] = {")
     for name, label, map_category, is_dungeon, first, count in maps:

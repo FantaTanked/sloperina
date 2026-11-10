@@ -94,7 +94,11 @@ enum { INPUT_STYLE_ROW, INPUT_STYLE_CONTROLLER }; /* input_style */
 int watches_corner = GFX_BOTTOM_LEFT;
 int watches_x = 30, watches_y = 600;
 bool watches_moving;
+bool watches_header = true;
 bool input_display;
+int input_corner = GFX_BOTTOM_LEFT;
+int input_x = 30, input_y = 800;
+bool input_moving;
 bool input_display_bg = true;
 bool input_show_left = true, input_show_right = true, input_show_buttons = true;
 int input_style = INPUT_STYLE_CONTROLLER;
@@ -236,10 +240,12 @@ static void input_row_frame(void)
     gfx_input(col - 1, 0, GFX_NORMAL, filler);
 }
 
-static void input_display_frame(bool menu_open)
+/* shown: drawn even with the menu open (it, or the watches, is being moved) */
+static void input_display_frame(bool menu_open, bool shown)
 {
-  if (!input_display || menu_open) /* hidden while the menu is open */
+  if ((!input_display || menu_open) && !shown) /* hidden while the menu is open */
     return;
+  gfx_input_place((gfx_corner_t)input_corner, input_x, input_y);
   gfx_input_background(input_display_bg);
   static const uint8_t size_percent[3] = { 50, 75, 100 }; /* input_size: small, medium, large */
   gfx_input_scale(size_percent[input_size >= 0 && input_size < 3 ? input_size : 0]);
@@ -845,7 +851,11 @@ void watches_frame(bool menu_open)
    * of watch visibility. Invalid chains are skipped and retried on the next frame. */
   if (js_height_lock)
     js_height_reset();
-  input_display_frame(menu_open);
+  /* set each frame by the menu's move: what's moved is shown, and so is the other if it's on, to place one
+   * by the other */
+  bool moving_watches = watches_moving, moving_input = input_moving, placing = moving_watches || moving_input;
+  watches_moving = input_moving = false;
+  input_display_frame(menu_open, moving_input || (placing && input_display));
   measure_motion();
   if (!lag_started) {
     lag_start_tick = sys_tick();
@@ -854,9 +864,8 @@ void watches_frame(bool menu_open)
   }
   if (!menu_open)
     command_input();
-  bool moving = watches_moving; /* set each frame by the menu's move */
-  watches_moving = false;
-  if ((menu_open && !moving) || (!watches_shown && !moving))
+  bool shown = moving_watches || (placing && watches_shown);
+  if ((menu_open && !shown) || (!watches_shown && !shown))
     return;
   if (watches_corner == GFX_CUSTOM)
     gfx_hud_at(watches_x, watches_y);
@@ -866,6 +875,8 @@ void watches_frame(bool menu_open)
     char label[24];
     if (watch_list[i].hidden)
       continue;
+    if (row == 0 && watches_header) /* over the first watch shown: none, no header */
+      gfx_hud_caption((gfx_corner_t)watches_corner, row++, T("watches"));
     watch_entry_display_label(&watch_list[i], label, sizeof(label));
     watch_entry_text(&watch_list[i], value, sizeof(value));
     snprintf(line, sizeof(line), "%-*.*s %.40s", GFX_WATCH_LABEL_W, GFX_WATCH_LABEL_W, label, value);

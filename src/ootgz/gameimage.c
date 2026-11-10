@@ -427,6 +427,11 @@ static int next_icon(int from)
   return GAMEIMAGES;
 }
 
+bool gameimage_failed(void)
+{
+  return state == FAILED;
+}
+
 void gameimage_frame(void)
 {
   if (state == DONE || state == FAILED || !gpuui_ready())

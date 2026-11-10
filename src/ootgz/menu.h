@@ -41,8 +41,6 @@ struct menu_item {
   char icon;                                         /* a GFX_ICON_* shown before the line, or 0 */
   uint8_t picture;                                   /* the game's style: the game's picture of the item
                                                         (gameimage.h's GAMEPIC_*) before its label, or 0 */
-  bool picture_pad;                                  /* ... two cells in, in line with the pictures after
-                                                        the checkboxes of the items around it */
   const uint8_t *choice_pictures;                    /* MI_OPTION: the picture for each choice instead */
   bool icon_select;                                  /* the icon is the button: only it (and a "< ... >"
                                                         switch in the line) shows the cursor */
