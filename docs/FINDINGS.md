@@ -884,6 +884,11 @@ Entries 1 to 4 and 14 were empty; 35 and 40 had no name getter.
   (Wolfos still in the ground, Stalfos before they drop, Poe sisters, Skulltulas before they come down) or 3, and goes
   to **4** (or 5) when it appears. Found by logging Wolfos before and after they jumped out, the two that stayed
   hidden as a control: also `+0x30` 8 -> 0, `+0x6E4` ffffffff -> 0 and `+0x518` 0x100 -> 0x42f changed with it.
+- **1.0.0 (v0):** the manager is `*(main+0x4E20930)` (the slot's neighbours `frame_counter` and `camera_ptr` sit
+  0x70460 below v131072's, and so does it): its singleton is made at `0xCCE6B0` (0x490 bytes), its constructor
+  `0xCCE730` makes a mutex at `+0x00`, zeroes `+0x28` and `+0x40` and leaves the tree's root at `+0x38` null. The
+  actors' fields are v131072's: 42 functions read the life through `+0x270`, `+0x2B8` and `+0x1C10` / `+0x1C18`,
+  hundreds the position as floats at `+0x31C`. Without it enemy health showed nothing on 1.0.0.
 - A dungeon keeps all its rooms' actors: Forest Temple had 32+ live enemies, so scene > enemy health keeps the 32
   nearest Link within 30 m. Its summary (`actors:` lines) goes to the log every 300 frames while it's on.
 

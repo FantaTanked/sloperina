@@ -62,6 +62,9 @@ static const struct z64hd_build z64hd_builds[] = {
     .disp_ptr = 0x4C18A98,
     .camera_ptr = 0x4E27C08,
     .frame_counter = 0x4E14740,
+    /* made at 0xCCE6B0 (0x490 bytes; constructor 0xCCE730: a mutex at +0x00, +0x28 / +0x40 zeroed, the
+     * actor tree's root at +0x38 null), as v131072's; the actors' life and position fields are the same */
+    .actor_mgr_ptr = 0x4E20930,
     .link_paths = {
       { 0x4DC7210, 0x480 }, { 0x4E243F8, 0x2E0 }, { 0x4E23158, 0xEF8 },
       { 0x4E24400, 0x328 },
