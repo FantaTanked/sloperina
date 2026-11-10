@@ -169,6 +169,27 @@ Read with [KillzXGaming/ShaderLibrary](https://github.com/KillzXGaming/ShaderLib
   property byte), curves (keys' frames and (value, slope) pairs, cubic between them) and constants. Its
   materials' values are a block of floats after the material's texture list. Tools in
   `sloperina-ui/scripts` (`sarc.py`, `buil_annot.py`, `buil_anim.py`).
+- In-game overlays (`overlayui.c`, in the gpuui frame under the panels): the air walls' outlines as smooth
+  lines (`gpuui_line`: a quad along the line sampling a soft profile from the atlas) with a glow under the
+  nearest, fading a little with distance; each enemy's health as the HUD's magic meter (`MpGaugeBase`,
+  `MpGaugeBaseFrame`, `MpGaugeSh`, and `MpGaugeCenter`'s segments loaded a second time with red and green
+  swapped, tinted to the hearts' red, a segment for each unit of the enemy's life (up to 12, else for each round
+  step of it: 2, 5, 10...), each drawn from the picture's own segments: its light edge and dark divider at the
+  meter's scale, the body tiled from their even middles; the meter and its plate on whole pixels (their thin rims
+  flickered at the fractions of a pixel a turning camera put them on); `MpGaugeSh` is the shadow's left end, drawn at the meter's scale with
+  the same mirrored for the right and its plain middle stretched between, so it's soft and reaches as far
+  past each end as past the top and bottom), its life on the minigames' number plate (`NumBaseMiniGame` and
+  its rim) in the game's bold type, the digits' bitmaps centred on the plate on a whole pixel and the slash
+  (which reaches below them in this type) lifted to their middle, the part a hit takes staying pale gold for
+  0.28 s and draining over 0.42;
+  frame advance's icon as smooth bars and a play triangle. They share the frame's quads with the panels, so
+  they're budgeted (1400 lines, 500 glows, 16 bars, the nearest first). Without its pictures (still
+  loading, or not found) a bar is plain, in their colours. The game thread (airwall.c, enemyhp.c) reads
+  the walls and enemies and projects them with the game's camera, making only what will be drawn: lines
+  and bars while `overlayui_on_gpu()` (the game's style, its shader and type loaded, gpuui started), else
+  the rectangles gz's style clears. Each frame's lines and bars go to the render thread in the same three
+  buffers as its dots and rectangles (`publish.h`, as the panels' screens): the render thread takes them once a
+  frame (`airwall_take`, `enemyhp_take`) and releases them after the present.
 - Without the GPU path (gpuui couldn't start), the game's type is drawn on the CPU, opaque, on gz's grid.
 
 Check the CPU drawing on the PC with `make nativepreview` and `obj/host/nativepreview <RomFS folder> out.ppm [scale]`.

@@ -1,11 +1,13 @@
-/* Air walls: port of airwall.py (FINDINGS §5.11), drawn as dotted outlines.
+/* Air walls: port of airwall.py (FINDINGS §5.11), drawn as outlines.
  *
  * Walls come from data.c (airwalls.json, built from the map layouts by tools/airwalls.py). A wall's
  * world point for a local shape point p is t + R (s * p), with R = Rz Ry Rx from its rotation, as
- * sead's makeR. Each frame the walls within AW_RANGE of the camera are projected with the game's
- * camera (+0x38 position, +0x44 look-at, +0x130 vertical fov, +0x140 aspect) and their edges turned
- * into rectangles, nearest wall first, which nvn.c draws by clearing them (no shaders). Edges within
- * about 19 degrees of level or upright are solid lines of a few long rectangles (a staircase); steeper
+ * sead's makeR; the points and edges are worked out once per map. Each frame the walls within AW_RANGE
+ * of the camera are projected with the game's camera (+0x38 position, +0x44 look-at, +0x130 vertical
+ * fov, +0x140 aspect), nearest wall first, and their edges handed to the render thread (publish.h) in the
+ * form it draws: in the game's style lines, which overlayui.c draws smooth on the GPU; in gz's (or if the
+ * GPU path can't start) rectangles, which nvn.c draws by clearing them (no shaders). Edges within about
+ * 19 degrees of level or upright are then solid lines of a few long rectangles (a staircase); steeper
  * ones are dots, which takes fewer clears than a staircase there. (FINDINGS §5.11 had see-through
  * faces; here only the outlines, and like the Python view they show through scenery.) */
 #include "airwall.h"
@@ -318,7 +320,11 @@ void airwall_link_text(char *buf, int len)
 
 static aw_dot_t dots[PUBLISH_BUFFERS][MAX_DOTS];
 static int n_dots[PUBLISH_BUFFERS];
+#define MAX_LINES 2048 /* more than overlayui.c draws */
+static aw_line_t lines[PUBLISH_BUFFERS][MAX_LINES];
+static int n_lines[PUBLISH_BUFFERS];
 static publish_t published = PUBLISH_INIT;
+static int taken = -1; /* the render thread's, from airwall_take to airwall_release */
 static int n_walls_near;
 
 /* 0..size to 0..65535, clamped */
@@ -426,8 +432,10 @@ static void add_line(aw_dot_t *out, int *n, float x0, float y0, float x1, float 
   }
 }
 
-/* The edge a-b (world points), projected, clipped and added to out[*n...]. */
-static void add_edge_dots(aw_dot_t *out, int *n, const view_cam_t *cam, const float a[3], const float b[3], uint8_t color)
+/* The edge a-b (world points), projected, clipped and added as a line to line_out[*n_line], or (no
+ * line_out) as rectangles to out[*n...]. */
+static void add_edge_dots(aw_dot_t *out, int *n, aw_line_t *line_out, int *n_line, const view_cam_t *cam,
+                          const float a[3], const float b[3], uint8_t color)
 {
   float va[3], vb[3];
   view_point(cam, a, va);
@@ -443,7 +451,13 @@ static void add_edge_dots(aw_dot_t *out, int *n, const view_cam_t *cam, const fl
   y1 *= REF_HEIGHT;
   if (!clip_to_picture(&x0, &y0, &x1, &y1))
     return;
-  add_line(out, n, x0, y0, x1, y1, color);
+  if (line_out) {
+    if (*n_line < MAX_LINES)
+      line_out[(*n_line)++] = (aw_line_t){ x0 / REF_WIDTH, y0 / REF_HEIGHT, x1 / REF_WIDTH, y1 / REF_HEIGHT,
+                                           va[2] < vb[2] ? va[2] : vb[2], color };
+  } else if (*n < MAX_DOTS) {
+    add_line(out, n, x0, y0, x1, y1, color);
+  }
 }
 
 /* --- hidden while the game is paused ------------------------------------------------------------- */
@@ -499,38 +513,52 @@ static int sort_near_walls(const view_cam_t *cam)
   return count;
 }
 
-void airwall_frame(void)
+void airwall_frame(bool gpu)
 {
   update_map();
   check_link();
-  int next = publish_next(&published);
-  int n = 0;
+  int f = publish_next(&published), n = 0, nl = 0;
   n_walls_near = 0;
   bool draw = airwalls_shown && current_map && !game_is_paused();
   view_cam_t cam;
   if (draw && view_camera(&cam)) {
-    /* nearest wall first, so the dot budget goes to what's close */
+    /* nearest wall first, so the budget goes to what's close */
     n_walls_near = sort_near_walls(&cam);
-    for (int k = 0; k < n_walls_near && n < MAX_DOTS; k++) {
+    for (int k = 0; k < n_walls_near && (gpu ? nl < MAX_LINES : n < MAX_DOTS); k++) {
       int i = near_order[k];
       const airwall_t *wall = map_wall(i);
       uint8_t color = i == link_wall ? AW_INSIDE : wall->kind == WALL_KIND_BLOCKS ? AW_BLOCKS : AW_OTHER;
       for (int e = wall_geo[i].first_edge; e < wall_geo[i].first_edge + wall_geo[i].n_edges; e++)
-        add_edge_dots(dots[next], &n, &cam, points[edges[e][0]], points[edges[e][1]], color);
+        add_edge_dots(dots[f], &n, gpu ? lines[f] : 0, &nl, &cam, points[edges[e][0]], points[edges[e][1]], color);
     }
   }
-  n_dots[next] = n;
-  publish_set(&published, n ? next : -1);
+  n_dots[f] = n;
+  n_lines[f] = nl;
+  publish_set(&published, n || nl ? f : -1);
+}
+
+void airwall_take(void)
+{
+  taken = publish_take(&published);
+}
+
+const aw_line_t *airwall_lines(int *n)
+{
+  *n = taken < 0 ? 0 : n_lines[taken];
+  return taken < 0 ? 0 : lines[taken];
 }
 
 const aw_dot_t *airwall_published(int *n)
 {
-  int buffer = publish_take(&published);
-  *n = buffer < 0 ? 0 : n_dots[buffer];
-  return buffer < 0 ? 0 : dots[buffer];
+  *n = taken < 0 ? 0 : n_dots[taken];
+  return taken < 0 ? 0 : dots[taken];
 }
 
-void airwall_release(void) { publish_release(&published); }
+void airwall_release(void)
+{
+  taken = -1;
+  publish_release(&published);
+}
 
 void airwall_summary(char *buf, int len)
 {

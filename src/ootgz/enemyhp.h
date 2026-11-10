@@ -1,5 +1,5 @@
-/* Enemy health: a bar with "life/max" over each living enemy near Link, drawn as rectangles over the
- * picture (like the air walls). */
+/* Enemy health: a bar with "life/max" over each living enemy near Link, handed to the render thread as
+ * bars (overlayui.c, on the GPU) or as rectangles (nvn.c, gz's style), like the air walls. */
 #ifndef ENEMYHP_H
 #define ENEMYHP_H
 
@@ -24,8 +24,17 @@ int enemies_read(enemy_t *out, int max);
 /* the colours of the rectangles (nvn.c) */
 enum { EH_BACK, EH_FILL, EH_LOW, EH_TEXT, EH_NCOLORS };
 
-void enemyhp_frame(void);                     /* game thread, once per frame */
-const aw_dot_t *enemyhp_published(int *n);    /* render thread */
-void enemyhp_release(void);                   /* render thread: done with them */
+/* an enemy's bar for the GPU (the game's style): where over its head (0..1 across the visible picture),
+ * its life, and how far it is from the camera (metres) */
+typedef struct { uintptr_t id; float x, y, distance; int32_t life, max_life; } eh_bar_t;
+
+/* game thread, once per frame: bars for the GPU, or (gpu false) rectangles */
+void enemyhp_frame(bool gpu);
+/* render thread: once a frame, before the two after it, takes the newest frame the game thread made (publish.h);
+ * enemyhp_release when done with it */
+void enemyhp_take(void);
+const aw_dot_t *enemyhp_published(int *n);
+const eh_bar_t *enemyhp_bars(int *n);
+void enemyhp_release(void);
 
 #endif

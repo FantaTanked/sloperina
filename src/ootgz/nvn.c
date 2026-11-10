@@ -28,6 +28,7 @@
 #include "gfx.h"
 #include "gamefont.h"
 #include "gpuui.h"
+#include "overlayui.h"
 #include "nativeui.h"
 #include "uishader.h"
 #include "sys.h"
@@ -1552,11 +1553,15 @@ static void record_readback(nvn_texture_t *tex, const panel_draw_t *draw)
 static void draw_overlay(nvn_queue_t *queue, nvn_window_t *window, int index)
 {
   const gfx_screen_t *screen = gfx_published();
-  int n_dots, n_hp;
+  airwall_take(); /* the overlays' newest frame: lines and bars for the GPU, or rectangles */
+  enemyhp_take();
+  int n_dots, n_hp, n_lines, n_bars;
   const aw_dot_t *dots = airwall_published(&n_dots);
   const aw_dot_t *hp = enemyhp_published(&n_hp);
+  airwall_lines(&n_lines);
+  enemyhp_bars(&n_bars);
   int pause_icon = gfx_pause_icon;
-  if ((!screen && !n_dots && !n_hp && !pause_icon) || overlay_state == OV_FAILED)
+  if ((!screen && !n_dots && !n_hp && !n_lines && !n_bars && !pause_icon) || overlay_state == OV_FAILED)
     return;
   if (index < 0 || index >= swapchain_texture_count) {
     static bool warned;
@@ -1585,6 +1590,7 @@ static void draw_overlay(nvn_queue_t *queue, nvn_window_t *window, int index)
   /* the game's style on the GPU, once its shader and fonts are loaded (game thread, first_frame) */
   if (gpu_state == GPU_NONE && gfx_style == GFX_STYLE_GAME && uishader_program(0) && gamefont_ready()) {
     gpu_state = gpuui_init(real_getproc, device) ? GPU_READY : GPU_FAILED;
+    overlayui_failed = gpu_state == GPU_FAILED; /* the game thread makes the overlays' rectangles instead */
   }
   bool gpu = gpu_state == GPU_READY && gfx_style == GFX_STYLE_GAME;
   /* tell the menu how many rows fit under the D-pad (the GPU lays it out with taller rows) */
@@ -1615,6 +1621,11 @@ static void draw_overlay(nvn_queue_t *queue, nvn_window_t *window, int index)
     return;
   if (gpu)
     gpuui_begin(tex, frame.area, th, origin_lower_left, frame.slot);
+  /* the air walls and the enemies' health: on the GPU in the game's style (under the panels), else as
+   * cleared rectangles below */
+  int overlays = gpu ? overlayui_draw(frame.area.w, frame.area.h, pause_icon) : 0;
+  if (overlays)
+    gpu_panels++;
 
   /* the input display over the watches in the bottom left, both on their bands (the game's style): one
    * width for both, the wider's, so the two bands are one */
@@ -1690,11 +1701,11 @@ static void draw_overlay(nvn_queue_t *queue, nvn_window_t *window, int index)
   fn.cmd_add_command(&cmd_buffer, &command_pool, frame.slot * CMD_SIZE, CMD_SIZE);
   fn.cmd_add_control(&cmd_buffer, control_mem + frame.slot * CTRL_SIZE, CTRL_SIZE);
   fn.cmd_begin(&cmd_buffer);
-  if (n_dots)
+  if (n_dots && !(overlays & OVERLAY_LINES))
     draw_rects(dots, n_dots, airwall_colours, AW_NCOLORS, tex, frame.area, th, frame.scale);
-  if (n_hp)
+  if (n_hp && !(overlays & OVERLAY_BARS))
     draw_rects(hp, n_hp, enemyhp_colours, EH_NCOLORS, tex, frame.area, th, frame.scale);
-  if (pause_icon)
+  if (pause_icon && !(overlays & OVERLAY_PAUSE))
     draw_pause_icon(pause_icon, tex, frame.area, th, frame.scale);
   for (int i = 0; i < n; i++) {
     const panel_draw_t *draw = &draws[i];
