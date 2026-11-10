@@ -5,6 +5,7 @@
  *   cheats=<bit per cheat_t>   watches_shown=0|1   watch_position=<gfx_corner_t>
  *   watch_list=<watch_t>:<display type>:<hidden>,...
  *   opacity=0..100             arrival_cutscenes=0|1      levitate=0|1      levitate_speed=<units/s>
+ *   menu_style=0|1 (0: the game's type, 1: gz's pixel font)
  *
  * (save_settings_file writes every key; parse_line reads them.)
  *
@@ -84,6 +85,7 @@ typedef struct {
   int32_t airwalls_shown;
   int32_t airwalls_all;
   int32_t enemy_hp;
+  int32_t menu_style;
 } snapshot_t;
 
 static bool mounted;
@@ -139,6 +141,7 @@ static snapshot_t take_snapshot(void)
   s.airwalls_shown = airwalls_shown;
   s.airwalls_all = airwalls_all;
   s.enemy_hp = enemy_hp_shown;
+  s.menu_style = gfx_style;
   return s;
 }
 
@@ -192,6 +195,8 @@ static void apply_snapshot(const snapshot_t *s)
     gfx_menu_scale = s->menu_scale;
   if (s->opacity >= 0 && s->opacity <= OPACITY_MAX)
     gfx_opacity = s->opacity / 10 * 10;
+  if (s->menu_style >= 0 && s->menu_style < GFX_STYLES)
+    gfx_style = s->menu_style;
   warp_arrival_cutscenes = s->arrival_cutscenes != 0;
   levitate_enabled = s->levitate != 0;
   if (s->levitate_speed >= 0 && s->levitate_speed <= LEVITATE_SPEED_MAX)
@@ -273,6 +278,7 @@ static const struct { const char *key; size_t field_offset; } int_keys[] = {
   INT_KEY("airwalls_shown", airwalls_shown),
   INT_KEY("airwalls_all", airwalls_all),
   INT_KEY("enemy_health", enemy_hp),
+  INT_KEY("menu_style", menu_style),
 };
 #define N_INT_KEYS (sizeof(int_keys) / sizeof(*int_keys))
 
@@ -392,6 +398,7 @@ void settings_load(void)
   lang_init(); /* the language files on the SD card, for the language setting */
 
   snapshot_t s = take_snapshot(); /* defaults for anything the file lacks */
+  s.menu_style = -1;               /* ... except the style: chosen below */
   bool have_list = false;
   static char text[SETTINGS_TEXT_MAX];
   const char *from;
@@ -408,6 +415,9 @@ void settings_load(void)
     parse_line(line, &s, &have_list);
     line = line_break ? end + 1 : end;
   }
+  /* a file from before the game's style: the game's, as for everyone */
+  if (s.menu_style < 0)
+    s.menu_style = GFX_STYLE_GAME;
 
   apply_snapshot(&s);
   last_saved = take_snapshot();
@@ -449,10 +459,10 @@ static void save_settings_file(const snapshot_t *s)
     n += snprintf(buf + n, sizeof(buf) - n,
                   "language=%s\nframe_advance=%d\nframe_advance_button=%d\npause_display=%d\nmenu_size=%d\n"
                   "input_display=%d\ninput_display_background=%d\ninput_display_parts=%d\n"
-                  "input_display_style=%d\ninput_display_size=%d\n",
+                  "input_display_style=%d\ninput_display_size=%d\nmenu_style=%d\n",
                   s->lang, (int)s->frame_advance, (int)s->frame_advance_button, (int)s->pause_display,
                   (int)s->menu_scale, (int)s->input_display, (int)s->input_display_bg, (int)s->input_parts,
-                  (int)s->input_style, (int)s->input_size);
+                  (int)s->input_style, (int)s->input_size, (int)s->menu_style);
   for (int w = 0; w < W_COUNT && n < (int)sizeof(buf); w++)
     if (s->watch_labels[w][0])
       n += snprintf(buf + n, sizeof(buf) - n, WATCH_LABEL_KEY "%d=%s\n", w, s->watch_labels[w]);

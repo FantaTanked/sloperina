@@ -13,6 +13,7 @@
 #include "build_info.h" /* made by the Makefile: BUILD_WHEN, BUILD_VERSION */
 #include "age.h"
 #include "gfx.h"
+#include "gameimage.h"
 #include "levitate.h"
 #include "lock.h"
 #include "position.h"
@@ -70,6 +71,14 @@ static const char *after_prefix(const char *text, const char *prefix)
     text++;
   }
   return *prefix ? NULL : text;
+}
+
+/* the about page's font line: the one the menu is drawn in */
+static void text_font(menu_item_t *it, char *buf, int len)
+{
+  (void)it;
+  snprintf(buf, len, "%s", gfx_style == GFX_STYLE_GAME ? T("font: the game's own, read from your copy of it")
+                                                      : T("font: Press Start 2P (codeman38, OFL)"));
 }
 
 /* an empty read-only line */
@@ -531,6 +540,78 @@ static void set_cheat(menu_item_t *it, bool on)
   cheats[it->data] = on;
 }
 
+/* --- the game's pictures of the items, before their labels in the item menus (the game's style) ------- */
+
+static const struct { const char *label; uint8_t picture; } item_pictures[] = {
+  { "energy", GAMEPIC_HEART }, { "rupees", GAMEPIC_RUPEE }, { "magic", GAMEPIC_POTION_GREEN },
+  { "magic meter", GAMEPIC_MAGIC }, { "deku sticks", GAMEPIC_STICK }, { "deku nuts", GAMEPIC_NUT },
+  { "deku seeds", GAMEPIC_SEED }, { "bombs", GAMEPIC_BOMB }, { "arrows", GAMEPIC_ARROW },
+  { "bombchus", GAMEPIC_BOMBCHU }, { "magic beans", GAMEPIC_BEAN }, { "boomerang", GAMEPIC_BOOMERANG },
+  { "fairy slingshot", GAMEPIC_SLINGSHOT }, { "fairy bow", GAMEPIC_BOW }, { "megaton hammer", GAMEPIC_HAMMER },
+  { "fire arrow", GAMEPIC_ARROW_FIRE }, { "ice arrow", GAMEPIC_ARROW_ICE }, { "light arrow", GAMEPIC_ARROW_LIGHT },
+  { "hookshot", GAMEPIC_HOOKSHOT }, { "din's fire", GAMEPIC_DIN }, { "farore's wind", GAMEPIC_FARORE },
+  { "nayru's love", GAMEPIC_NAYRU }, { "ocarina", GAMEPIC_OCARINA_TIME }, { "fairy ocarina", GAMEPIC_OCARINA_FAIRY },
+  { "ocarina of time", GAMEPIC_OCARINA_TIME }, { "bottle a", GAMEPIC_BOTTLE }, { "bottle b", GAMEPIC_BOTTLE },
+  { "bottle c", GAMEPIC_BOTTLE }, { "bottle d", GAMEPIC_BOTTLE }, { "bottle e", GAMEPIC_BOTTLE },
+  { "kokiri sword", GAMEPIC_SWORD_KOKIRI }, { "master sword", GAMEPIC_SWORD_MASTER },
+  { "big sword", GAMEPIC_SWORD_GIANT }, { "kokiri shield", GAMEPIC_SHIELD_DEKU },
+  { "hylian shield", GAMEPIC_SHIELD_HYLIAN }, { "mirror shield", GAMEPIC_SHIELD_MIRROR },
+  { "goron tunic", GAMEPIC_TUNIC_GORON }, { "zora tunic", GAMEPIC_TUNIC_ZORA }, { "iron boots", GAMEPIC_BOOTS_IRON },
+  { "hover boots", GAMEPIC_BOOTS_HOVER }, { "lenses of truth", GAMEPIC_LENS }, { "echo gem", GAMEPIC_AGONY },
+  { "gerudo card", GAMEPIC_GERUDO_CARD }, { "double defense", GAMEPIC_DEFENSE },
+  { "goron's bracelet", GAMEPIC_BRACELET }, { "gauntlets", GAMEPIC_GAUNTLETS }, { "scale", GAMEPIC_SCALE },
+  { "skulltulas", GAMEPIC_SKULLTULA }, { "deku stick bag", GAMEPIC_STICK_BAG }, { "deku nut bag", GAMEPIC_NUT_BAG },
+  { "deku seed bag", GAMEPIC_BULLET_BAG }, { "bomb bag", GAMEPIC_BOMB_BAG }, { "quiver", GAMEPIC_QUIVER },
+  { "wallet", GAMEPIC_WALLET },
+};
+
+static bool same_text(const char *a, const char *b)
+{
+  while (*a && *a == *b)
+    a++, b++;
+  return *a == *b;
+}
+
+/* the options whose picture is the chosen item's (as many as their choices; "none" shows the first) */
+static const uint8_t ocarina_pictures[] = { GAMEPIC_OCARINA_FAIRY, GAMEPIC_OCARINA_FAIRY, GAMEPIC_OCARINA_TIME };
+static const uint8_t hookshot_pictures[] = { GAMEPIC_HOOKSHOT, GAMEPIC_HOOKSHOT, GAMEPIC_LONGSHOT };
+static const uint8_t big_sword_pictures[] = { GAMEPIC_SWORD_GIANT, GAMEPIC_SWORD_GIANT, GAMEPIC_SWORD_BROKEN,
+                                              GAMEPIC_SWORD_BIGGORON };
+static const uint8_t gauntlet_pictures[] = { GAMEPIC_GAUNTLETS, GAMEPIC_GAUNTLETS, GAMEPIC_GAUNTLETS_GOLD };
+static const uint8_t scale_pictures[] = { GAMEPIC_SCALE, GAMEPIC_SCALE, GAMEPIC_SCALE_GOLD };
+static const uint8_t magic_pictures[] = { GAMEPIC_MAGIC, GAMEPIC_MAGIC, GAMEPIC_MAGIC_DOUBLE };
+static const struct { const char *label; const uint8_t *pictures; int n; } choice_pictures[] = {
+  { "ocarina", ocarina_pictures, ARRAY_LEN(ocarina_pictures) },
+  { "hookshot", hookshot_pictures, ARRAY_LEN(hookshot_pictures) },
+  { "big sword", big_sword_pictures, ARRAY_LEN(big_sword_pictures) },
+  { "gauntlets", gauntlet_pictures, ARRAY_LEN(gauntlet_pictures) },
+  { "scale", scale_pictures, ARRAY_LEN(scale_pictures) },
+  { "magic meter", magic_pictures, ARRAY_LEN(magic_pictures) },
+};
+
+/* the items of an item menu: their pictures, by their labels (an option's by its choice, when it has a
+ * table of them as long as its choices); in a menu with checkboxes, the others' two cells in, so all its
+ * pictures are in a column after the checkboxes */
+static void add_pictures(menu_t *m)
+{
+  bool checks = false;
+  for (int i = 0; i < m->n_items; i++) {
+    for (unsigned k = 0; k < ARRAY_LEN(item_pictures); k++) {
+      if (m->items[i].label && same_text(m->items[i].label, item_pictures[k].label)) {
+        m->items[i].picture = item_pictures[k].picture;
+        break;
+      }
+    }
+    for (unsigned k = 0; k < ARRAY_LEN(choice_pictures); k++)
+      if (m->items[i].picture && m->items[i].kind == MI_OPTION && m->items[i].n_choices == choice_pictures[k].n &&
+          same_text(m->items[i].label, choice_pictures[k].label))
+        m->items[i].choice_pictures = choice_pictures[k].pictures;
+    checks |= m->items[i].picture && m->items[i].kind == MI_CHECK;
+  }
+  for (int i = 0; i < m->n_items; i++)
+    m->items[i].picture_pad = checks && m->items[i].picture && m->items[i].kind != MI_CHECK;
+}
+
 static void build_cheats(void)
 {
   menu_init(&m_cheats, "cheats", CHEAT_COUNT + 3);
@@ -541,6 +622,7 @@ static void build_cheats(void)
     menu_add_check(&m_cheats, cheat_names[cheat], get_cheat, set_cheat, cheat);
   }
   menu_add_return(&m_cheats);
+  add_pictures(&m_cheats);
 }
 
 /* --- inventory: owned items and gear ------------------------------------------------------------- */
@@ -1175,6 +1257,10 @@ static void build_inventory(void)
   build_collection();
   build_quest_and_songs();
   build_dungeon_items();
+  menu_t *pictured[] = { &m_child_items, &m_adult_items, &m_universal, &m_ammo, &m_equipment, &m_collection,
+                         &m_capacity, &m_magic };
+  for (unsigned i = 0; i < ARRAY_LEN(pictured); i++)
+    add_pictures(pictured[i]);
 }
 
 /* --- equips ------------------------------------------------------------------------------------- */
@@ -1800,6 +1886,7 @@ static void add_watch_tools(bool reselect, int part)
     return;
   tools->text = tools_text;
   tools->cursor = tools_cursor;
+  tools->grid = true; /* its typed address: the cursor's digit doesn't move the others */
   tools->press = tools_press;
   tools->n_parts = 2;
   tools->part_hints = tool_hints;
@@ -1953,6 +2040,17 @@ static menu_t m_settings, m_input_display, m_levitate, m_frame_advance;
 static const char *const opacity_names[] = { "0%", "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%",
                                              "90%", "100%" };
 static const char *const size_names[] = { "auto", "small (2x)", "medium (2.5x)", "large (3x)" };
+static const char *const style_names[GFX_STYLES] = { [GFX_STYLE_GAME] = "the game's", [GFX_STYLE_GZ] = "gz" };
+
+static int get_style(menu_item_t *it)
+{
+  return gfx_style;
+}
+
+static void set_style(menu_item_t *it, int style)
+{
+  gfx_style = style;
+}
 
 static int get_size(menu_item_t *it)
 {
@@ -2227,18 +2325,21 @@ static void build_levitate(void)
 
 static void build_settings(void)
 {
-  menu_init(&m_settings, "settings", 10);
+  menu_init(&m_settings, "settings", 11);
   menu_add_heading(&m_settings, "menu settings");
   menu_item_t *language = menu_add_option(&m_settings, "language", 1, lang_names(), get_lang, set_lang, 0);
   if (language)
-    language->hint = "files in sd:/ootgz/lang (see lang/template.json)";
+    language->hint = "files in sd:/sloperinaGZ/lang (see lang/template.json)";
   menu_item_t *size = menu_add_option(&m_settings, "size", ARRAY_LEN(size_names), size_names, get_size, set_size, 0);
   if (size)
     size->hint = "text size of the menu, watches and log (auto: for the screen)";
   menu_item_t *opacity = menu_add_option(&m_settings, "background opacity", ARRAY_LEN(opacity_names), opacity_names,
                                          get_opacity, set_opacity, 0);
   if (opacity)
-    opacity->hint = "below 100%: costs some speed, and what's behind lags 2 frames";
+    opacity->hint = "the backdrop's opacity (gz's style below 100%: slower, and lags 2 frames)";
+  menu_item_t *style = menu_add_option(&m_settings, "style", GFX_STYLES, style_names, get_style, set_style, 0);
+  if (style)
+    style->hint = "the game's type, buttons and backdrop, or gz's pixel font";
   menu_end_group(&m_settings);
   menu_add_heading(&m_settings, "other settings");
   menu_add_submenu(&m_settings, "input display", &m_input_display);
@@ -2610,10 +2711,21 @@ static const char *const log_arrow_hints[] = { "L: scroll to newer (held: keeps 
                                                "L: scroll to older (held: keeps going)" };
 
 /* it->data: the row */
+/* a log message, cut at a word with "..." when it's longer than a row holds */
+#define LOG_LINE_W (GFX_COLS - 2) /* menu.c's ITEM_COL */
 static void text_log(menu_item_t *it, char *buf, int len)
 {
   const char *message = log_nth(log_top + (int)it->data, 0);
   snprintf(buf, len, "%s", message ? message : "");
+  int n = (int)strlen(buf);
+  if (n > LOG_LINE_W && len > LOG_LINE_W) {
+    int cut = LOG_LINE_W - 3;
+    while (cut > LOG_LINE_W / 2 && buf[cut] != ' ')
+      cut--;
+    if (buf[cut] != ' ')
+      cut = LOG_LINE_W - 3;
+    snprintf(buf + cut, (size_t)(len - cut), "...");
+  }
 }
 
 static void build_log(void)
@@ -2666,7 +2778,7 @@ static void build_about(void)
   menu_add_heading(&m_about, title);
   menu_add_text(&m_about, text_static, (intptr_t)BUILD_WHEN);
   menu_add_text(&m_about, text_static, (intptr_t) "gz-style practice menu, loaded by the game");
-  menu_add_text(&m_about, text_static, (intptr_t) "font: Press Start 2P (codeman38, OFL)");
+  menu_add_text(&m_about, text_font, 0);
   menu_add_text(&m_about, text_static, (intptr_t) "based on the work of OoT N64's Practice ROM by glankk");
   menu_end_group(&m_about);
   add_blank_line(&m_about);

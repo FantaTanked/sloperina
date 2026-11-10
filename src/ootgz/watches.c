@@ -109,12 +109,12 @@ static const char filler[2] = { FILLER_CHAR, 0 };
 
 /* gfx_input_pad's `clicks` bits: the sticks pressed in, and the d-pad arms held */
 enum {
-  PAD_LSTICK = 1 << 0,
-  PAD_RSTICK = 1 << 1,
-  PAD_DUP = 1 << 2,
-  PAD_DDOWN = 1 << 3,
-  PAD_DLEFT = 1 << 4,
-  PAD_DRIGHT = 1 << 5,
+  PAD_LSTICK = 1 << GFX_CLICK_L3,
+  PAD_RSTICK = 1 << GFX_CLICK_R3,
+  PAD_DUP = 1 << GFX_CLICK_DPAD_UP,
+  PAD_DDOWN = 1 << GFX_CLICK_DPAD_DOWN,
+  PAD_DLEFT = 1 << GFX_CLICK_DPAD_LEFT,
+  PAD_DRIGHT = 1 << GFX_CLICK_DPAD_RIGHT,
 };
 
 /* the controller style's grid (columns and rows of text) */
@@ -174,7 +174,10 @@ static void controller_frame(void)
     if (held & BTN_DRIGHT)
       clicks |= PAD_DRIGHT;
   }
-  gfx_input_pad(sticks, clicks);
+  static const uint8_t devices[] = { [INPUT_PRO] = GFX_PAD_PRO, [INPUT_JOYCONS] = GFX_PAD_JOYCONS,
+                                     [INPUT_HANDHELD] = GFX_PAD_HANDHELD };
+  int controller = input_controller();
+  gfx_input_pad(sticks, clicks, controller >= 0 && controller < 3 ? devices[controller] : GFX_PAD_PRO);
   if (input_show_buttons) {
     for (unsigned i = 0; i < sizeof(pad_buttons) / sizeof(*pad_buttons); i++) {
       gfx_style_t style = held & pad_buttons[i].bit ? GFX_NORMAL : GFX_FAINT;
@@ -865,7 +868,7 @@ void watches_frame(bool menu_open)
       continue;
     watch_entry_display_label(&watch_list[i], label, sizeof(label));
     watch_entry_text(&watch_list[i], value, sizeof(value));
-    snprintf(line, sizeof(line), "%-12.12s %.40s", label, value);
+    snprintf(line, sizeof(line), "%-*.*s %.40s", GFX_WATCH_LABEL_W, GFX_WATCH_LABEL_W, label, value);
     gfx_hud((gfx_corner_t)watches_corner, row++, GFX_NORMAL, line);
   }
 }

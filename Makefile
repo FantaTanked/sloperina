@@ -83,6 +83,13 @@ $(OBJDIR)/host/mkips: $(HOSTDIR)/mkips.c $(SRCDIR)/z64hd.h $(SRCDIR)/z64hd_build
 	mkdir -p $(@D)
 	$(HOSTCC) -std=c11 -O2 -Wall -o $@ $<
 
+# the PC preview of the game's-style panels (src/host/nativepreview.c): run it with the game's RomFS folder
+NATIVEUI_SRC = $(HOSTDIR)/nativepreview.c $(HOSTDIR)/gpuui_stub.c $(SRCDIR)/gamefile.c $(SRCDIR)/zstd.c $(SRCDIR)/gamefont.c $(SRCDIR)/nativeui.c
+nativepreview: $(OBJDIR)/host/nativepreview
+$(OBJDIR)/host/nativepreview: $(NATIVEUI_SRC) $(HDRS)
+	mkdir -p $(@D)
+	$(HOSTCC) -std=gnu11 -O2 -Wall -Wextra -Wno-unused-parameter -I$(SRCDIR) -o $@ $(NATIVEUI_SRC)
+
 # Install trees. Atmosphère convention (also what a Switch 2 CFW with LayeredFS would need):
 #   atmosphere/contents/<program id>/exefs/subsdk9
 #   atmosphere/exefs_patches/$(NAME)/<build id>.ips
@@ -103,4 +110,4 @@ dist: all
 clean:
 	rm -rf $(OBJDIR) $(BINDIR) $(DISTDIR)
 
-.PHONY: all dist clean FORCE
+.PHONY: all dist clean nativepreview FORCE

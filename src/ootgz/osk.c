@@ -170,6 +170,7 @@ void osk_build(void)
   if (text_item) {
     text_item->text = text_line;
     text_item->cursor = text_cursor;
+    text_item->grid = true;
     text_item->on_change = text_move;
     text_item->hint = "d-left/right: cursor   L: done";
   }
@@ -178,6 +179,7 @@ void osk_build(void)
     if (row_item) {
       row_item->text = key_line;
       row_item->cursor = key_cursor;
+      row_item->grid = true; /* the keys in columns, as the cursor moves between rows */
       row_item->on_change = key_move;
       row_item->hint = row < N_KEY_ROWS ? "d-left/right: key   L: type it"
                                         : "L: shift / space / backspace / delete / done";

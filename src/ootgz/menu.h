@@ -39,6 +39,11 @@ struct menu_item {
   intptr_t data, data2;
   uint8_t indent;                                    /* under a heading: drawn MENU_INDENT columns in */
   char icon;                                         /* a GFX_ICON_* shown before the line, or 0 */
+  uint8_t picture;                                   /* the game's style: the game's picture of the item
+                                                        (gameimage.h's GAMEPIC_*) before its label, or 0 */
+  bool picture_pad;                                  /* ... two cells in, in line with the pictures after
+                                                        the checkboxes of the items around it */
+  const uint8_t *choice_pictures;                    /* MI_OPTION: the picture for each choice instead */
   bool icon_select;                                  /* the icon is the button: only it (and a "< ... >"
                                                         switch in the line) shows the cursor */
   void (*on_change)(menu_item_t *it, int dir);       /* MI_ACTION: d-left/right */
@@ -55,6 +60,9 @@ struct menu_item {
   const char *edit_hint;
   bool edit_alone;                                   /* while editing, the menu shows only its hint */
   bool plain;                                        /* MI_TEXT drawn in the normal colour (not dim) */
+  bool grid;                                         /* the game's style keeps its line on gz's grid, a
+                                                        character a cell: its columns line up with the rows
+                                                        around it, and its cursor doesn't move the text */
 };
 
 #define MENU_INDENT 2

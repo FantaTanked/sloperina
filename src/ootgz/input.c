@@ -44,17 +44,32 @@ static int repeat_countdown;
 bool input_block_game;
 uint32_t input_hide_from_game;
 
-/* Add one controller's state (one style of one NpadIdType) to this frame's input. */
-static void read_npad(void (*get_states)(int *, void *, int, const uint32_t *), uint32_t npad_id)
+static int controller = INPUT_PRO;
+
+/* Add one controller's state (one style of one NpadIdType) to this frame's input: true when it's connected
+ * and something on it is pressed or tilted (*connected: whether it's connected) */
+static bool read_npad(void (*get_states)(int *, void *, int, const uint32_t *), uint32_t npad_id, bool *connected)
 {
   uint64_t buf[NPAD_STATE_BUF / 8] = { 0 };
   int state_count = 0;
+  *connected = false;
   get_states(&state_count, buf, 1, &npad_id);
   if (state_count < 1)
-    return;
+    return false;
   npad_state_t *state = (npad_state_t *)buf;
   if (!(state->attributes & NPAD_ATTR_CONNECTED))
-    return;
+    return false;
+  *connected = true;
+  /* buttons beyond those this module knows (A..D-pad, the sticks' directions, SL, SR): logged once each, to
+   * learn what the Switch 2's controllers send (GL / GR are the system's to assign: nn::hid's
+   * GetGlGrButtonConfigState; whether a game ever sees them as buttons of their own is unknown) */
+  static uint64_t unknown_seen;
+  uint64_t unknown = state->buttons & ~(uint64_t)0x3FFFFFF;
+  if (unknown & ~unknown_seen) {
+    unknown_seen |= unknown;
+    log_printf("input: buttons this module doesn't know, from NpadIdType %u: 0x%llx", (unsigned)npad_id,
+               (unsigned long long)unknown);
+  }
   buttons_held |= (uint32_t)state->buttons;
   if (state->lx || state->ly) {
     stick_axes[0] = state->lx;
@@ -64,6 +79,16 @@ static void read_npad(void (*get_states)(int *, void *, int, const uint32_t *), 
     stick_axes[2] = state->rx;
     stick_axes[3] = state->ry;
   }
+  /* in use: a button (not the sticks' direction bits) or a stick well off centre, so a resting stick's
+   * drift doesn't count */
+  const int32_t off = 0x3000; /* about 40% of a stick's travel */
+  return (state->buttons & 0xFFFF) || state->lx > off || state->lx < -off || state->ly > off || state->ly < -off ||
+         state->rx > off || state->rx < -off || state->ry > off || state->ry < -off;
+}
+
+int input_controller(void)
+{
+  return controller;
 }
 
 void input_update(void)
@@ -71,9 +96,14 @@ void input_update(void)
   uint32_t previously_held = buttons_held;
   buttons_held = 0;
   stick_axes[0] = stick_axes[1] = stick_axes[2] = stick_axes[3] = 0;
-  read_npad(hid_detail_fullkey, NPAD_NO1);
-  read_npad(hid_detail_joydual, NPAD_NO1);
-  read_npad(hid_detail_handheld, NPAD_HANDHELD);
+  /* the controller is the one used last; one that's gone gives way to one that's there */
+  bool connected[3], used[3];
+  used[INPUT_PRO] = read_npad(hid_detail_fullkey, NPAD_NO1, &connected[INPUT_PRO]);
+  used[INPUT_JOYCONS] = read_npad(hid_detail_joydual, NPAD_NO1, &connected[INPUT_JOYCONS]);
+  used[INPUT_HANDHELD] = read_npad(hid_detail_handheld, NPAD_HANDHELD, &connected[INPUT_HANDHELD]);
+  for (int i = 0; i < 3; i++)
+    if (used[i] || (!connected[controller] && connected[i]))
+      controller = i;
   buttons_pressed = buttons_held & ~previously_held;
 
   buttons_fired = buttons_pressed;

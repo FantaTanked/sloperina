@@ -37,6 +37,7 @@ volatile bool gfx_on_screen;
 volatile int gfx_menu_rows = GFX_ROWS;
 volatile int gfx_opacity = 60;
 volatile int gfx_menu_scale;
+volatile int gfx_style = GFX_STYLE_GAME;
 volatile int gfx_custom_x = -1, gfx_custom_y = -1;
 volatile int gfx_pause_icon;
 volatile uint32_t gfx_presents;
@@ -61,6 +62,25 @@ void gfx_begin(void)
 void gfx_text(int col, int row, gfx_style_t style, const char *s)
 {
   put_text(&menu_panel, col, row, style, s);
+}
+
+void gfx_row(int row, int kind)
+{
+  if (row >= 0 && row < GFX_ROWS)
+    menu_panel.kind[row] = (uint8_t)kind;
+}
+
+void gfx_hint(const char *s)
+{
+  snprintf(menu_panel.hint, sizeof(menu_panel.hint), "%s", s ? s : "");
+}
+
+void gfx_scroll(int row, int rows, int items, int top)
+{
+  menu_panel.scroll_row = (uint8_t)row;
+  menu_panel.scroll_rows = (uint8_t)rows;
+  menu_panel.scroll_items = (uint16_t)items;
+  menu_panel.scroll_top = (uint16_t)top;
 }
 
 void gfx_end(void) {}
@@ -226,16 +246,19 @@ void gfx_input(int col, int row, gfx_style_t style, const char *s)
 {
   input_panel.corner = GFX_BOTTOM_LEFT;
   input_panel.yoff = 1; /* text in the middle of the panel (nvn.c TEXT_TOP) */
-  if (row >= 0 && row < GFX_ROWS)
+  if (row >= 0 && row < GFX_ROWS) {
     input_panel.alpha[row] = OPAQUE;
+    input_panel.kind[row] = GFX_ROW_BUTTONS;
+  }
   put_text(&input_panel, col, row, style, s);
 }
 
-void gfx_input_pad(const int8_t sticks[4], uint8_t clicks)
+void gfx_input_pad(const int8_t sticks[4], uint8_t clicks, int device)
 {
   input_panel.pad = 1;
   memcpy(input_panel.sticks, sticks, 4);
   input_panel.clicks = clicks;
+  input_panel.device = (uint8_t)device;
 }
 
 void gfx_hud_at(int x_permille, int y_permille)
@@ -248,6 +271,8 @@ void gfx_hud(gfx_corner_t corner, int row, gfx_style_t style, const char *s)
 {
   hud_panel.corner = corner;
   hud_panel.yoff = 1; /* text in the middle of the panel (nvn.c TEXT_TOP) */
+  if (row >= 0 && row < GFX_ROWS)
+    hud_panel.kind[row] = GFX_ROW_WATCH;
   put_text(&hud_panel, 0, row, style, s);
 }
 
@@ -274,8 +299,10 @@ static char plain_char(char ch)
     case GFX_ICON_LEFT: return '<';
     case GFX_ICON_RIGHT: return '>';
     case 0:
+    case GFX_PICTURE:
     case GFX_WIDE_REST: return ' ';
-    default: return ch;
+    default: /* a picture's number (GFX_PICTURE_ID: the pictures number under gpuui.h's GPU_IMAGES, 80) */
+      return (unsigned char)ch >= 0xA0 && (unsigned char)ch < 0xA0 + 80 ? ' ' : ch;
   }
 }
 
@@ -336,7 +363,7 @@ static void measure_panel(gfx_panel_t *panel)
   panel->rows = 0;
   panel->cols = 0;
   uint32_t hash = FNV_OFFSET_BASIS ^ panel->corner ^ (uint32_t)panel->clear << 8; /* the shadow depends on clear */
-  hash = hash_mix(hash, (uint32_t)panel->pad << 9 ^ (uint32_t)panel->clicks << 10 ^
+  hash = hash_mix(hash, (uint32_t)panel->pad << 9 ^ (uint32_t)panel->clicks << 10 ^ (uint32_t)panel->device << 24 ^
                           (uint32_t)(uint8_t)panel->yoff << 12 ^ (uint32_t)panel->scale_pct << 16);
   for (int i = 0; i < 4; i++) /* the sticks are drawn from these */
     hash = hash_mix(hash, (uint8_t)panel->sticks[i]);
@@ -350,6 +377,12 @@ static void measure_panel(gfx_panel_t *panel)
       }
       hash = hash_mix(hash, (uint8_t)panel->ch[r][c] ^ (uint32_t)panel->style[r][c] << 8);
     }
+  for (int r = 0; r < GFX_ROWS; r++)
+    hash = hash_mix(hash, panel->kind[r]);
+  for (const char *h = panel->hint; *h; h++)
+    hash = hash_mix(hash, (uint8_t)*h);
+  hash = hash_mix(hash, (uint32_t)panel->scroll_row << 24 ^ (uint32_t)panel->scroll_rows << 16 ^ panel->scroll_top);
+  hash = hash_mix(hash, panel->scroll_items);
   panel->hash = hash ? hash : 1;
 }
 
