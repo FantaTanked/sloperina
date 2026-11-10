@@ -89,6 +89,11 @@ bool sys_mapped(uintptr_t addr, size_t size, uint32_t perm)
   return addr + size <= region->addr + region->size;
 }
 
+void sys_frame(void)
+{
+  last_region.size = 0;
+}
+
 uintptr_t sys_ptr(uintptr_t addr)
 {
   if ((addr & 7) || !sys_mapped(addr, 8, SYS_PERM_R))
