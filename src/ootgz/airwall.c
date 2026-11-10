@@ -14,6 +14,7 @@
 #include "gamedata.h"
 #include "link.h"
 #include "lang.h"
+#include "publish.h"
 #include "sys.h"
 #include "view.h"
 
@@ -24,7 +25,7 @@ float sqrtf(float x);
 bool airwalls_shown, airwalls_all;
 
 #define AW_RANGE 60.0f
-#define MAX_WALLS 256
+#define MAX_WALLS 512
 #define MAX_POINTS 4096
 #define MAX_EDGES 8192
 #define MAX_DOTS 3000
@@ -109,6 +110,8 @@ static void add_edge(int a, int b)
 static void add_box(const airwall_t *wall, const float R[9], const airshape_t *box)
 {
   int base = n_points;
+  if (base + 8 > MAX_POINTS)
+    return;
   for (int corner = 0; corner < 8; corner++) {
     float local[3], world[3];
     for (int axis = 0; axis < 3; axis++)
@@ -126,6 +129,8 @@ static void add_box(const airwall_t *wall, const float R[9], const airshape_t *b
 static void add_cylinder(const airwall_t *wall, const float R[9], const airshape_t *cylinder)
 {
   int base = n_points;
+  if (base + 2 * CYLINDER_SEGMENTS > MAX_POINTS)
+    return;
   for (int ring = 0; ring < 2; ring++) {
     const float *centre = ring ? cylinder->b : cylinder->a;
     for (int j = 0; j < CYLINDER_SEGMENTS; j++) {
@@ -187,7 +192,7 @@ static void build_map_geometry(const airmap_t *map)
     geo->n_edges = (uint16_t)(n_edges - geo->first_edge);
     bounding_sphere(wall, first_point, geo->centre, &geo->radius);
   }
-  log_printf("air walls: %s: %d walls, %d edges", map->map, n_walls, n_edges);
+  log_printf("air walls: %s: %d of %d walls, %d points, %d edges", map->map, n_walls, map->n, n_points, n_edges);
 }
 
 static bool str_equal(const char *a, const char *b)
@@ -311,10 +316,9 @@ void airwall_link_text(char *buf, int len)
 
 /* --- projection to dots ------------------------------------------------------------------------- */
 
-/* Two buffers: the game thread fills one while the render thread draws the other. */
-static aw_dot_t dots[2][MAX_DOTS];
-static int n_dots[2];
-static volatile int published = -1; /* the buffer to draw, or -1 for none */
+static aw_dot_t dots[PUBLISH_BUFFERS][MAX_DOTS];
+static int n_dots[PUBLISH_BUFFERS];
+static publish_t published = PUBLISH_INIT;
 static int n_walls_near;
 
 /* 0..size to 0..65535, clamped */
@@ -499,7 +503,7 @@ void airwall_frame(void)
 {
   update_map();
   check_link();
-  int next = published == 0 ? 1 : 0;
+  int next = publish_next(&published);
   int n = 0;
   n_walls_near = 0;
   bool draw = airwalls_shown && current_map && !game_is_paused();
@@ -516,15 +520,17 @@ void airwall_frame(void)
     }
   }
   n_dots[next] = n;
-  __atomic_store_n(&published, n ? next : -1, __ATOMIC_RELEASE);
+  publish_set(&published, n ? next : -1);
 }
 
 const aw_dot_t *airwall_published(int *n)
 {
-  int buffer = __atomic_load_n(&published, __ATOMIC_ACQUIRE);
+  int buffer = publish_take(&published);
   *n = buffer < 0 ? 0 : n_dots[buffer];
   return buffer < 0 ? 0 : dots[buffer];
 }
+
+void airwall_release(void) { publish_release(&published); }
 
 void airwall_summary(char *buf, int len)
 {

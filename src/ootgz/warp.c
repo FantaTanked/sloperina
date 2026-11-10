@@ -27,8 +27,8 @@
  * and this arrival (Dm_SY_Ocarina › OcarinaWarp's EventReserveBancChange); it needs no starter. */
 #define NO_STARTER_ARRIVAL "OcarinaWarp_Arrive"
 
-#define WARP_TIMEOUT_FRAMES (300 * 30) /* how long an armed fallback waits for an exit */
-#define REQUEST_TIMEOUT_FRAMES 90      /* the event writes the reserved map within this, or we fall back */
+#define WARP_TIMEOUT_FRAMES (300 * GAME_FPS) /* how long an armed fallback waits for an exit */
+#define REQUEST_TIMEOUT_FRAMES (3 * GAME_FPS) /* the event writes the reserved map within this, or we fall back */
 
 bool warp_arrival_cutscenes;
 
@@ -258,6 +258,9 @@ void warp_frame(void)
   else if (state == WARP_ARMED)
     swap_exit_destination();
 }
+
+bool warp_pending(void) { return state == WARP_ARMED || state == WARP_REQUESTED; }
+bool warp_abandoned(void) { return state == WARP_CANCELLED || state == WARP_TIMED_OUT; }
 
 const char *warp_state(void)
 {

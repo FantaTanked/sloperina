@@ -149,6 +149,9 @@ static void hook_present(nvn_queue_t *queue, nvn_window_t *window, int index)
 {
   gfx_presents++;
   draw_overlay(queue, window, index);
+  gfx_release();
+  airwall_release();
+  enemyhp_release();
   real_present(queue, window, index);
 }
 
@@ -465,7 +468,7 @@ static bool see_through_init(int menu_max_height)
   }
   if (!ok) {
     log_printf("see-through background off: not enough memory (needs %u KiB)", (unsigned)(total / 1024));
-    gfx_notice("see-through background: the game has no memory free for it");
+    gfx_notice_later("see-through background: the game has no memory free for it");
     see_through_free();
     see_through_state = ST_FAILED;
     return false;

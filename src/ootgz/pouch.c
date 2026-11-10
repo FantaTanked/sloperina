@@ -317,7 +317,7 @@ static const uint32_t button_slots[] = { 0x6BEE602D, 0x76F85E6D, 0xA0029837, 0xB
 
 /* The item wheel keeps its own copy of the buttons and writes it back when it closes, so a
  * clear is repeated for a while (FINDINGS §5.6). */
-#define BUTTON_WATCH_FRAMES (120 * 30)
+#define BUTTON_WATCH_FRAMES (120 * GAME_FPS)
 #define BUTTON_WATCHES 8
 static struct {
   uint32_t choice; /* murmur3 of the choice to keep off the buttons; 0 = unused */

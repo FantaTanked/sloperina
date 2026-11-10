@@ -3,6 +3,7 @@
 #define LINK_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 typedef struct { float x, y, z; } vec3f_t;
@@ -22,5 +23,10 @@ uintptr_t link_equip_owner(void);
 /* Find an 8-byte-aligned u64 `value` in writable memory; calls ok(addr) on each hit until
  * it returns true. Returns the accepted address or 0. Slow (whole heap): cache results. */
 uintptr_t mem_find_u64(uint64_t value, bool (*ok)(uintptr_t addr, void *ctx), void *ctx);
+/* The same search, at most `budget` bytes a call. Zero the state to start; `done` once the whole heap
+ * has been read without a hit. */
+typedef struct { uintptr_t pos; bool done; } mem_scan_t;
+uintptr_t mem_find_u64_step(mem_scan_t *scan, uint64_t value, bool (*ok)(uintptr_t addr, void *ctx), void *ctx,
+                            size_t budget);
 
 #endif

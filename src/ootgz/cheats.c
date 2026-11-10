@@ -47,10 +47,12 @@ static void fill_to(uint32_t field_hash, int32_t target)
 #define MAGIC_OBJ_HASHES     0x38 /* u32 magic hash, then u32 capacity hash */
 #define MAGIC_OBJ_VALUE      0x44 /* s32 current magic */
 #define MAGIC_OBJ_SIZE       0x48 /* what must be mapped from the object's start */
-#define MAGIC_SEARCH_FRAMES  150  /* ~5 s between searches while it's missing */
+#define MAGIC_SEARCH_FRAMES  (5 * GAME_FPS) /* between searches while it's missing */
+#define MAGIC_SCAN_PER_FRAME  (16u << 20)
 
 static uintptr_t magic_obj;
 static uint32_t magic_next_search; /* frame_counter() value */
+static mem_scan_t magic_scan;
 
 /* mem_find_u64 filter: the hashes found are inside a writable magic meter object */
 static bool magic_candidate_ok(uintptr_t hashes_addr, void *unused)
@@ -60,8 +62,8 @@ static bool magic_candidate_ok(uintptr_t hashes_addr, void *unused)
          sys_mapped(hashes_addr - MAGIC_OBJ_HASHES, MAGIC_OBJ_SIZE, SYS_PERM_R | SYS_PERM_W);
 }
 
-/* The meter's current magic, or 0 if the object can't be found (searched for at most every
- * MAGIC_SEARCH_FRAMES). */
+/* The meter's current magic, or 0 if the object isn't found (yet): the heap search is spread over the
+ * frames that ask, and starts again MAGIC_SEARCH_FRAMES after one that found nothing. */
 static int32_t *magic_value(void)
 {
   const uint64_t hashes = (uint64_t)HASH_MAGIC_CAPACITY << 32 | HASH_MAGIC;
@@ -72,17 +74,26 @@ static int32_t *magic_value(void)
   uint32_t now = frame_counter();
   if ((int32_t)(now - magic_next_search) < 0)
     return 0;
-  magic_next_search = now + MAGIC_SEARCH_FRAMES;
-  uintptr_t found = mem_find_u64(hashes, magic_candidate_ok, 0);
+  uintptr_t found = mem_find_u64_step(&magic_scan, hashes, magic_candidate_ok, 0, MAGIC_SCAN_PER_FRAME);
+  if (found || magic_scan.done) {
+    magic_scan = (mem_scan_t){0};
+    magic_next_search = now + MAGIC_SEARCH_FRAMES;
+  }
   magic_obj = found ? found - MAGIC_OBJ_HASHES : 0;
   return magic_obj ? (int32_t *)(magic_obj + MAGIC_OBJ_VALUE) : 0;
 }
+
+/* a value waiting for the search to find the meter */
+static bool magic_wanted;
+static int32_t magic_wanted_value;
 
 void magic_set(int32_t value)
 {
   int32_t *meter_value = magic_value();
   if (meter_value)
     *meter_value = value;
+  magic_wanted = !meter_value && magic_scan.pos;
+  magic_wanted_value = value;
   gd_set_int(HASH_MAGIC, value);
 }
 
@@ -90,6 +101,8 @@ void cheats_frame(void)
 {
   if (!gd_ready())
     return;
+  if (magic_wanted)
+    magic_set(magic_wanted_value);
   if (cheats[CHEAT_ENERGY]) {
     int32_t *current, *max;
     if (link_health(&current, &max) && *current < *max)

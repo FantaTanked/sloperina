@@ -8,6 +8,7 @@
 
 #include "gamedata.h"
 #include "link.h"
+#include "publish.h"
 #include "sys.h"
 #include "view.h"
 
@@ -34,9 +35,9 @@ bool enemy_hp_shown;
 
 /* --- rectangles ------------------------------------------------------------------------------------ */
 
-static aw_dot_t rects[2][MAX_RECTS];
-static int n_rects[2];
-static volatile int published = -1;
+static aw_dot_t rects[PUBLISH_BUFFERS][MAX_RECTS];
+static int n_rects[PUBLISH_BUFFERS];
+static publish_t published = PUBLISH_INIT;
 
 static uint16_t to_unit16(float v, float size)
 {
@@ -159,7 +160,7 @@ static void log_hits(const enemy_t *enemies, int n)
 
 void enemyhp_frame(void)
 {
-  int next = published == 0 ? 1 : 0;
+  int next = publish_next(&published);
   int n = 0;
   if (enemy_hp_shown) {
     enemy_t enemies[MAX_ENEMIES];
@@ -179,12 +180,14 @@ void enemyhp_frame(void)
     n_seen = 0;
   }
   n_rects[next] = n;
-  __atomic_store_n(&published, n ? next : -1, __ATOMIC_RELEASE);
+  publish_set(&published, n ? next : -1);
 }
 
 const aw_dot_t *enemyhp_published(int *n)
 {
-  int buffer = __atomic_load_n(&published, __ATOMIC_ACQUIRE);
+  int buffer = publish_take(&published);
   *n = buffer < 0 ? 0 : n_rects[buffer];
   return buffer < 0 ? 0 : rects[buffer];
 }
+
+void enemyhp_release(void) { publish_release(&published); }

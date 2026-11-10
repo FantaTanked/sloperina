@@ -170,7 +170,7 @@ static void filter_game_states(void *states, int count)
   static int hid_wrap_##n(void *out, int count, const uint32_t *id) \
   {                                                                 \
     int result = hid_public_##n(out, count, id);                    \
-    filter_game_states(out, count);                                 \
+    filter_game_states(out, result < count ? result : count);       \
     return result;                                                  \
   }
 WRAP(0) WRAP(1) WRAP(2) WRAP(3) WRAP(4)

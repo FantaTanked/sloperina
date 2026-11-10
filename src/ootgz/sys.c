@@ -193,10 +193,12 @@ void log_printf(const char *fmt, ...)
   sys_output_debug_string(buf, PREFIX_LEN + message_len);
 
   /* the menu's copy (without the prefix), cut to a line */
+  file_lock_take();
   log_head = (log_head + 1) % LOG_LINES;
   size_t ring_len = message_len < LOG_LINE_LEN - 1 ? message_len : LOG_LINE_LEN - 1;
   memcpy(log_ring[log_head], message, ring_len);
   log_ring[log_head][ring_len] = 0;
+  file_lock_release();
   file_pending_add(message, message_len);
 }
 

@@ -12,6 +12,7 @@
  *      where the old patch handled the menu's requests, so the game's own functions are
  *      safe to call (give items, redraw screens...).
  */
+#include "age.h"
 #include "cheats.h"
 #include "gamedata.h"
 #include "gfx.h"
@@ -345,6 +346,7 @@ static void frame(void)
   position_frame(menu_current != 0);
   lock_frame();
   warp_frame();
+  age_frame();
   gfx_frame();
 
   cheats_frame();
