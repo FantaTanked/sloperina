@@ -4,7 +4,7 @@
   Run install.bat (or: powershell -ExecutionPolicy Bypass -File install.ps1). With no options it lists the
   emulators it finds and asks where to install. Options, for scripting:
 
-    -Target eden|yuzu|suyu|sudachi|citron|torzu|ryujinx|switch|folder
+    -Target lichii|fritchii|eden|yuzu|suyu|sudachi|citron|torzu|ryujinx|switch|folder
     -Path   <folder>   the emulator's user folder (with -Target folder: a yuzu-family one), or the SD card's root
     -Uninstall         remove sloperinaGZ instead (your settings stay)
     -Yes               don't ask before replacing files
@@ -31,7 +31,9 @@ $Template = Join-Path $Files 'lang\template.json'
 
 # emulators, with where they keep their data on Windows; kind: how they lay out mods
 $Emulators = @(
-  @{ Id = 'eden';    Label = 'Eden / Lichii'; Kind = 'yuzu';    Dir = Join-Path $env:APPDATA 'eden' },
+  @{ Id = 'lichii';  Label = 'Lichii (build 150+)'; Kind = 'yuzu';    Dir = Join-Path $env:APPDATA 'lichii' },
+  @{ Id = 'fritchii'; Label = 'Fritchii (v5.8+)'; Kind = 'yuzu';    Dir = Join-Path $env:APPDATA 'fritchii' },
+  @{ Id = 'eden';    Label = 'Eden / Lichii (build 130 and older) / Fritchii (v5.7 and older)'; Kind = 'yuzu'; Dir = Join-Path $env:APPDATA 'eden' },
   @{ Id = 'yuzu';    Label = 'yuzu';          Kind = 'yuzu';    Dir = Join-Path $env:APPDATA 'yuzu' },
   @{ Id = 'suyu';    Label = 'suyu';          Kind = 'yuzu';    Dir = Join-Path $env:APPDATA 'suyu' },
   @{ Id = 'sudachi'; Label = 'sudachi';       Kind = 'yuzu';    Dir = Join-Path $env:APPDATA 'sudachi' },

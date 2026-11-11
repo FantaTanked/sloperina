@@ -7,7 +7,7 @@ running game build automatically.
 
 - **The game:** The Legend of Zelda: Ocarina of Time (Switch 2), **1.0.0** (base) or **1.1.1** (update v131072). Other
   versions do not load the practice menu.
-- **Where it runs:** an emulator from the yuzu family (Eden, Lichii, yuzu, suyu, sudachi, citron, torzu),
+- **Where it runs:** an emulator from the yuzu family (Lichii, Fritchii, Eden, yuzu, suyu, sudachi, citron, torzu),
   Ryujinx, or a console running Atmosphère.
 - **Download** the latest release zip and unzip it anywhere.
 
@@ -36,7 +36,7 @@ Same questions, same result. (If it says *permission denied*: `sh install.sh`.)
 
 | Windows | Linux / macOS | Does |
 |---|---|---|
-| `install.bat -Target eden` | `./install.sh eden` | Install for that emulator without asking (`eden yuzu suyu sudachi citron torzu ryujinx`) |
+| `install.bat -Target lichii` | `./install.sh lichii` | Install for that emulator without asking (`lichii fritchii eden yuzu suyu sudachi citron torzu ryujinx`) |
 | `install.bat -Target switch -Path E:\` | `./install.sh switch /media/you/SWITCH` | Install to a Switch SD card |
 | `install.bat -Target folder -Path D:\emu\user` | `./install.sh folder ~/emu/user` | A portable or unusual emulator folder (the one with `load` and `sdmc`) |
 | add `-Uninstall` | add `--uninstall` first | Remove sloperinaGZ (your settings stay) |
@@ -46,9 +46,9 @@ Same questions, same result. (If it says *permission denied*: `sh install.sh`.)
 
 The zip's `files` folder has everything. Copy the module and both patches (and, if you like, the translation template) here:
 
-### Eden, Lichii, yuzu, suyu, sudachi, citron, torzu
+### Lichii, Fritchii, Eden, yuzu, suyu, sudachi, citron, torzu
 
-Open the emulator's folder (right-click the game > *Open mod data location*, or `%APPDATA%\eden`, `%APPDATA%\yuzu`
+Open the emulator's folder (right-click the game > *Open mod data location*, or `%APPDATA%\lichii` (Lichii build 150 and later), `%APPDATA%\fritchii` (Fritchii v5.8 and later), `%APPDATA%\eden` (Eden, Lichii up to build 130, Fritchii up to v5.7), `%APPDATA%\yuzu`
 ... on Windows, `~/.local/share/<name>` on Linux) and make:
 
 ```

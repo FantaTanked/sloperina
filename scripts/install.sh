@@ -2,7 +2,7 @@
 # sloperinaGZ installer for Linux, macOS and Steam Deck.
 #
 #   ./install.sh                      list the emulators found and ask where to install
-#   ./install.sh <target> [<path>]    target: eden yuzu suyu sudachi citron torzu ryujinx switch folder
+#   ./install.sh <target> [<path>]    target: lichii fritchii eden yuzu suyu sudachi citron torzu ryujinx switch folder
 #                                     path: the emulator's user folder, or the SD card's root (switch)
 #   ./install.sh --uninstall ...      remove sloperinaGZ instead (your settings stay)
 #   ./install.sh --yes ...            don't ask before replacing files
@@ -94,7 +94,7 @@ if [ -z "$TARGET" ]; then
   echo
   echo "Where should it go?"
   i=0; CHOICES=""
-  for e in eden yuzu suyu sudachi citron torzu ryujinx; do
+  for e in lichii fritchii eden yuzu suyu sudachi citron torzu ryujinx; do
     d=$(data_dir "$e")
     [ -n "$d" ] || continue
     i=$((i + 1)); CHOICES="$CHOICES$e|$d
@@ -113,7 +113,7 @@ if [ -z "$TARGET" ]; then
 fi
 
 KIND=$(kind_of "$TARGET")
-case "$TARGET" in eden|yuzu|suyu|sudachi|citron|torzu|ryujinx|switch|folder) ;; *) echo "Unknown target '$TARGET'."; exit 1 ;; esac
+case "$TARGET" in lichii|fritchii|eden|yuzu|suyu|sudachi|citron|torzu|ryujinx|switch|folder) ;; *) echo "Unknown target '$TARGET'."; exit 1 ;; esac
 [ -n "$TPATH" ] || [ "$TARGET" = switch ] || [ "$TARGET" = folder ] || TPATH=$(data_dir "$TARGET")
 if [ -z "$TPATH" ]; then
   if [ "$KIND" = switch ]; then printf "SD card (its folder, e.g. /media/you/SWITCH): "; else printf "The emulator's user folder (with load and sdmc): "; fi
